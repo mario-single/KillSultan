@@ -46,7 +46,7 @@ function mapError(err: unknown): { code: string; message: string } {
   }
   return {
     code: "INTERNAL_ERROR",
-    message: err instanceof Error ? err.message : "Unknown error",
+    message: err instanceof Error ? err.message : "未知错误",
   };
 }
 
@@ -63,7 +63,7 @@ async function syncRoom(roomId: string): Promise<void> {
       }
     });
   } catch {
-    // Room may already be removed; no-op.
+    // 房间可能已经被销毁，此处忽略即可。
   }
 }
 
@@ -216,5 +216,5 @@ io.on("connection", (socket) => {
 });
 
 server.listen(env.port, () => {
-  console.log(`server listening on http://localhost:${env.port}`);
+  console.log(`服务端已启动：http://localhost:${env.port}`);
 });

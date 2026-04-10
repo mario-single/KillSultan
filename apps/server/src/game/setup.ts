@@ -30,7 +30,7 @@ export function buildDeck(playerCount: number): Role[] {
     deck.push("slave");
   }
 
-  // Fill the rest while keeping enough revolutionary pressure for larger tables.
+  // 剩余卡牌按守卫/奴隶交替填充，保证大局人数下仍有阵营对抗张力。
   let toggle: Role = "slave";
   while (deck.length < totalCards) {
     deck.push(toggle);

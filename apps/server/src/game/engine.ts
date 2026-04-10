@@ -48,6 +48,38 @@ export class GameError extends Error {
   }
 }
 
+const ROLE_NAME_ZH: Record<Role, string> = {
+  sultan: "苏丹",
+  assassin: "刺客",
+  guard: "守卫",
+  slave: "奴隶",
+  oracle: "占卜师",
+  belly_dancer: "肚皮舞娘",
+};
+
+function roleNameZh(role: Role): string {
+  return ROLE_NAME_ZH[role] ?? role;
+}
+
+function factionNameZh(faction: WinFaction): string {
+  return faction === "rebels" ? "革命党" : "保皇派";
+}
+
+function actionNameZh(action: string): string {
+  switch (action) {
+    case "peek":
+      return "偷看";
+    case "swap":
+      return "交换";
+    case "swap_center":
+      return "换中间牌";
+    case "reveal":
+      return "公开";
+    default:
+      return action;
+  }
+}
+
 export class GameEngine {
   private readonly rooms = new Map<string, ActiveRoom>();
   private readonly socketIndex = new Map<string, { roomId: string; playerId: string }>();
@@ -97,7 +129,7 @@ export class GameEngine {
       logs: [],
     };
 
-    this.addLog(state, "system", `${playerName} created room ${roomId}`, playerId);
+    this.addLog(state, "system", `${playerName} 创建了房间 ${roomId}`, playerId);
 
     const room: ActiveRoom = {
       state,
@@ -138,11 +170,11 @@ export class GameEngine {
     }
 
     if (state.phase !== "lobby") {
-      throw new GameError("ROOM_ALREADY_STARTED", "Game already started; only reconnect is allowed.");
+      throw new GameError("ROOM_ALREADY_STARTED", "游戏已开始，仅支持原玩家重连。");
     }
 
     if (state.seatOrder.length >= state.settings.maxPlayers) {
-      throw new GameError("ROOM_FULL", "Room is full.");
+      throw new GameError("ROOM_FULL", "房间人数已满。");
     }
 
     const playerId = uuid();
@@ -162,7 +194,7 @@ export class GameEngine {
     state.players[playerId] = player;
     state.seatOrder.push(playerId);
     this.attachSocket(room, playerId, socketId);
-    this.addLog(state, "system", `${player.name} joined room`, playerId);
+    this.addLog(state, "system", `${player.name} 加入了房间`, playerId);
     this.markUpdated(state);
     await this.persist(room);
 
@@ -177,7 +209,7 @@ export class GameEngine {
     const room = await this.getRoomOrThrow(roomId);
     const player = Object.values(room.state.players).find((candidate) => candidate.token === token);
     if (!player) {
-      throw new GameError("RESYNC_NOT_FOUND", "No matching player token in room.");
+      throw new GameError("RESYNC_NOT_FOUND", "该房间中不存在匹配的玩家凭证。");
     }
     player.connected = true;
     this.attachSocket(room, player.id, socketId);
@@ -203,7 +235,7 @@ export class GameEngine {
       }
 
       this.detachSocket(room, socketId);
-      this.addLog(room.state, "system", `${player.name} left the room`, playerId);
+      this.addLog(room.state, "system", `${player.name} 离开了房间`, playerId);
 
       if (room.state.seatOrder.length === 0) {
         this.rooms.delete(roomId);
@@ -223,7 +255,7 @@ export class GameEngine {
     } else {
       player.connected = false;
       this.detachSocket(room, socketId);
-      this.addLog(room.state, "system", `${player.name} disconnected`, playerId);
+      this.addLog(room.state, "system", `${player.name} 断开连接`, playerId);
     }
 
     this.markUpdated(room.state);
@@ -235,13 +267,13 @@ export class GameEngine {
     const room = await this.getRoomOrThrow(roomId);
     const playerId = this.resolvePlayerId(room, socketId);
     if (room.state.phase !== "lobby") {
-      throw new GameError("GAME_ALREADY_STARTED", "Cannot set ready state after game starts.");
+      throw new GameError("GAME_ALREADY_STARTED", "游戏开始后不能再切换准备状态。");
     }
     room.state.players[playerId].ready = ready;
     this.addLog(
       room.state,
       "system",
-      `${room.state.players[playerId].name} is ${ready ? "ready" : "not ready"}`,
+      `${room.state.players[playerId].name} ${ready ? "已准备" : "取消准备"}`,
       playerId,
     );
     this.markUpdated(room.state);
@@ -255,20 +287,20 @@ export class GameEngine {
     const { state } = room;
 
     if (state.phase !== "lobby") {
-      throw new GameError("GAME_ALREADY_STARTED", "Game already started.");
+      throw new GameError("GAME_ALREADY_STARTED", "游戏已经开始。");
     }
     if (state.hostPlayerId !== actorId) {
-      throw new GameError("NOT_HOST", "Only host can start the game.");
+      throw new GameError("NOT_HOST", "只有房主可以开始游戏。");
     }
     if (state.seatOrder.length < MIN_PLAYERS || state.seatOrder.length > MAX_PLAYERS) {
       throw new GameError(
         "INVALID_PLAYER_COUNT",
-        `Player count must be between ${MIN_PLAYERS} and ${MAX_PLAYERS}.`,
+        `玩家人数必须在 ${MIN_PLAYERS} 到 ${MAX_PLAYERS} 之间。`,
       );
     }
     const unreadyPlayer = state.seatOrder.find((id) => !state.players[id].ready);
     if (unreadyPlayer) {
-      throw new GameError("PLAYERS_NOT_READY", "All players must be ready before start.");
+      throw new GameError("PLAYERS_NOT_READY", "开始前需要所有玩家都准备。");
     }
 
     const deck = buildDeck(state.seatOrder.length);
@@ -285,11 +317,11 @@ export class GameEngine {
     state.phase = "in_game";
     state.winner = undefined;
     state.effects = {};
-    this.addLog(state, "system", "Game started. Roles distributed.");
+    this.addLog(state, "system", "游戏开始，身份已发放。");
     this.addLog(
       state,
       "turn",
-      `Round ${state.turn.round}, turn of ${state.players[this.currentPlayerId(state)].name}.`,
+      `第 ${state.turn.round} 轮，轮到 ${state.players[this.currentPlayerId(state)].name} 行动。`,
     );
     this.markUpdated(state);
     await this.persist(room);
@@ -309,7 +341,7 @@ export class GameEngine {
     const player = room.state.players[location.playerId];
     if (player) {
       player.connected = false;
-      this.addLog(room.state, "system", `${player.name} disconnected`, player.id);
+      this.addLog(room.state, "system", `${player.name} 断开连接`, player.id);
       this.markUpdated(room.state);
       await this.persist(room);
     }
@@ -342,7 +374,7 @@ export class GameEngine {
   getScopedState(roomId: string, playerId: string): PlayerScopedState {
     const room = this.rooms.get(roomId);
     if (!room) {
-      throw new GameError("ROOM_NOT_FOUND", "Room not found.");
+      throw new GameError("ROOM_NOT_FOUND", "房间不存在。");
     }
     return buildPlayerScopedState(room.state, playerId);
   }
@@ -360,10 +392,10 @@ export class GameEngine {
     const actor = this.getPlayerOrThrow(state, actorId);
     const target = this.getPlayerOrThrow(state, targetPlayerId);
     if (!target.alive) {
-      throw new GameError("TARGET_DEAD", "Cannot peek a dead player.");
+      throw new GameError("TARGET_DEAD", "不能偷看已死亡玩家。");
     }
     if (actor.id === target.id) {
-      throw new GameError("INVALID_TARGET", "Cannot peek yourself.");
+      throw new GameError("INVALID_TARGET", "不能偷看自己。");
     }
 
     actor.privateKnowledge.push({
@@ -376,10 +408,10 @@ export class GameEngine {
     });
     this.trimKnowledge(actor);
 
-    this.addLog(state, "peek", `${actor.name} peeked at ${target.name}`, actor.id, target.id);
+    this.addLog(state, "peek", `${actor.name} 偷看了 ${target.name} 的身份`, actor.id, target.id);
     const privateNotice = {
-      message: `Peek result: ${target.name} has role ${target.card.role}.`,
-      detail: { targetPlayerId: target.id, role: target.card.role },
+      message: `偷看结果：${target.name} 的身份是 ${roleNameZh(target.card.role)}。`,
+      detail: { targetPlayerId: target.id, role: target.card.role, roleNameZh: roleNameZh(target.card.role) },
     };
 
     this.finishActionAndAdvance(state);
@@ -406,20 +438,20 @@ export class GameEngine {
     const actor = this.getPlayerOrThrow(state, actorId);
     const target = this.getPlayerOrThrow(state, targetPlayerId);
     if (!target.alive) {
-      throw new GameError("TARGET_DEAD", "Cannot swap with a dead player.");
+      throw new GameError("TARGET_DEAD", "不能与已死亡玩家交换。");
     }
     if (actor.id === target.id) {
-      throw new GameError("INVALID_TARGET", "Cannot swap with yourself.");
+      throw new GameError("INVALID_TARGET", "不能与自己交换。");
     }
     if (actor.card.faceUp || target.card.faceUp) {
-      throw new GameError("FACE_UP_FORBIDDEN", "Cannot swap if either card is face-up.");
+      throw new GameError("FACE_UP_FORBIDDEN", "任一方明牌时不能交换。");
     }
 
     const actorCard = { ...actor.card };
     actor.card = { ...target.card, version: target.card.version + 1 };
     target.card = { ...actorCard, version: actorCard.version + 1 };
 
-    this.addLog(state, "swap", `${actor.name} swapped with ${target.name}`, actor.id, target.id);
+    this.addLog(state, "swap", `${actor.name} 与 ${target.name} 交换了暗牌`, actor.id, target.id);
     this.finishActionAndAdvance(state);
     this.markUpdated(state);
     await this.persist(room);
@@ -438,10 +470,10 @@ export class GameEngine {
 
     const actor = this.getPlayerOrThrow(state, actorId);
     if (actor.card.faceUp) {
-      throw new GameError("FACE_UP_FORBIDDEN", "Face-up cards cannot swap with center.");
+      throw new GameError("FACE_UP_FORBIDDEN", "明牌状态不能与中间牌交换。");
     }
     if (!actor.alive) {
-      throw new GameError("ACTOR_DEAD", "Dead players cannot act.");
+      throw new GameError("ACTOR_DEAD", "死亡玩家不能行动。");
     }
 
     const actorCard = { ...actor.card };
@@ -456,7 +488,7 @@ export class GameEngine {
       version: actorCard.version + 1,
     };
 
-    this.addLog(state, "swap_center", `${actor.name} swapped with center card`, actor.id);
+    this.addLog(state, "swap_center", `${actor.name} 与中间牌完成了交换`, actor.id);
     this.finishActionAndAdvance(state);
     this.markUpdated(state);
     await this.persist(room);
@@ -488,12 +520,12 @@ export class GameEngine {
 
     const actor = this.getPlayerOrThrow(state, actorId);
     if (actor.card.faceUp) {
-      throw new GameError("ALREADY_REVEALED", "Card is already face-up.");
+      throw new GameError("ALREADY_REVEALED", "该身份牌已经公开。");
     }
 
     actor.card.faceUp = true;
     actor.card.version += 1;
-    this.addLog(state, "reveal", `${actor.name} revealed their card`, actor.id);
+    this.addLog(state, "reveal", `${actor.name} 公开了身份牌`, actor.id);
 
     let privateNotice: EngineMutationResult["privateNotice"];
 
@@ -501,36 +533,36 @@ export class GameEngine {
       case "sultan": {
         state.effects.sultanPlayerId = actor.id;
         state.effects.sultanCrownedRound = state.turn.round;
-        this.addLog(state, "skill", `${actor.name} crowned as Sultan`, actor.id);
+        this.addLog(state, "skill", `${actor.name} 完成加冕，成为明牌苏丹`, actor.id);
 
         if (payload.targetPlayerId) {
           const target = this.getPlayerOrThrow(state, payload.targetPlayerId);
           if (!target.card.faceUp) {
-            throw new GameError("INVALID_EXECUTION_TARGET", "Sultan can only execute a revealed target.");
+            throw new GameError("INVALID_EXECUTION_TARGET", "苏丹只能处决已公开的目标。");
           }
           if (effectiveFaction(target) !== "rebels") {
-            throw new GameError("INVALID_EXECUTION_TARGET", "Target is not a revealed revolutionary.");
+            throw new GameError("INVALID_EXECUTION_TARGET", "目标不是已公开的革命阵营角色。");
           }
           if (!target.alive) {
-            throw new GameError("INVALID_EXECUTION_TARGET", "Target is already dead.");
+            throw new GameError("INVALID_EXECUTION_TARGET", "目标已经死亡。");
           }
           target.alive = false;
           target.card.faceUp = true;
           target.card.version += 1;
-          this.addLog(state, "death", `${actor.name} executed ${target.name}`, actor.id, target.id);
+          this.addLog(state, "death", `${actor.name} 处决了 ${target.name}`, actor.id, target.id);
         }
         break;
       }
       case "assassin": {
         if (!payload.targetPlayerId) {
-          throw new GameError("MISSING_TARGET", "Assassin reveal requires a target.");
+          throw new GameError("MISSING_TARGET", "刺客公开时必须指定刺杀目标。");
         }
         const target = this.getPlayerOrThrow(state, payload.targetPlayerId);
         if (!target.alive) {
-          throw new GameError("INVALID_TARGET", "Target is already dead.");
+          throw new GameError("INVALID_TARGET", "目标已经死亡。");
         }
         if (target.id === actor.id) {
-          throw new GameError("INVALID_TARGET", "Assassin cannot target self.");
+          throw new GameError("INVALID_TARGET", "刺客不能把自己作为刺杀目标。");
         }
 
         const guardIds = this.findProtectingGuards(state, actor.id, target.id);
@@ -541,14 +573,14 @@ export class GameEngine {
           this.addLog(
             state,
             "death",
-            `Assassination failed. ${actor.name} was killed by guard protection.`,
+            `刺杀失败：${actor.name} 被守卫反制并死亡。`,
             actor.id,
           );
         } else {
           target.alive = false;
           target.card.faceUp = true;
           target.card.version += 1;
-          this.addLog(state, "death", `${actor.name} assassinated ${target.name}`, actor.id, target.id);
+          this.addLog(state, "death", `${actor.name} 成功刺杀了 ${target.name}`, actor.id, target.id);
           if (target.card.role === "sultan") {
             state.effects.sultanKilledByAssassin = true;
           }
@@ -557,17 +589,17 @@ export class GameEngine {
       }
       case "guard": {
         if (!payload.targetPlayerId) {
-          throw new GameError("MISSING_TARGET", "Guard reveal requires a detention target.");
+          throw new GameError("MISSING_TARGET", "守卫公开时必须指定拘留目标。");
         }
         const target = this.getPlayerOrThrow(state, payload.targetPlayerId);
         if (!target.alive) {
-          throw new GameError("INVALID_TARGET", "Target is dead.");
+          throw new GameError("INVALID_TARGET", "目标已经死亡。");
         }
         if (this.isGuardCharmed(state, actor.id)) {
           this.addLog(
             state,
             "skill",
-            `${actor.name} is charmed by Belly Dancer and cannot detain.`,
+            `${actor.name} 被肚皮舞娘魅惑，本回合无法拘留。`,
             actor.id,
           );
           break;
@@ -576,14 +608,14 @@ export class GameEngine {
           this.addLog(
             state,
             "skill",
-            `${actor.name} tried to detain ${target.name}, but target is immune.`,
+            `${actor.name} 试图拘留 ${target.name}，但目标免疫拘留。`,
             actor.id,
             target.id,
           );
           break;
         }
         target.skipActions += 1;
-        this.addLog(state, "detain", `${actor.name} detained ${target.name}`, actor.id, target.id);
+        this.addLog(state, "detain", `${actor.name} 拘留了 ${target.name}`, actor.id, target.id);
         break;
       }
       case "slave": {
@@ -598,19 +630,19 @@ export class GameEngine {
           }
           follower.card.faceUp = true;
           follower.card.version += 1;
-          this.addLog(state, "skill", `${follower.name} followed slave uprising`, follower.id);
+          this.addLog(state, "skill", `${follower.name} 响应了奴隶起义`, follower.id);
         });
-        this.addLog(state, "skill", `${actor.name} started a slave uprising`, actor.id);
+        this.addLog(state, "skill", `${actor.name} 发动了奴隶起义`, actor.id);
         break;
       }
       case "oracle": {
         if (!payload.oraclePrediction) {
-          throw new GameError("MISSING_PREDICTION", "Oracle must choose a prediction faction.");
+          throw new GameError("MISSING_PREDICTION", "占卜师必须选择一个预言阵营。");
         }
         actor.oraclePrediction = payload.oraclePrediction;
         const subjects = payload.inspectSubjects ?? this.pickDefaultOracleSubjects(state, actor.id);
         if (subjects.length === 0) {
-          throw new GameError("INVALID_ORACLE_TARGETS", "No valid oracle subjects.");
+          throw new GameError("INVALID_ORACLE_TARGETS", "没有可占卜的目标。");
         }
         const cappedSubjects = subjects.slice(0, 3);
         const inspected = cappedSubjects.map((subject) => {
@@ -640,7 +672,7 @@ export class GameEngine {
         this.trimKnowledge(actor);
 
         privateNotice = {
-          message: "Oracle insight ready.",
+          message: "占卜完成，私密结果已更新。",
           detail: {
             prediction: payload.oraclePrediction,
             inspected,
@@ -649,16 +681,16 @@ export class GameEngine {
         this.addLog(
           state,
           "skill",
-          `${actor.name} made an oracle prediction and inspected three cards.`,
+          `${actor.name} 完成了占卜并查看了三张牌。`,
           actor.id,
         );
         break;
       }
       case "belly_dancer": {
-        this.addLog(state, "skill", `${actor.name} revealed as Belly Dancer`, actor.id);
+        this.addLog(state, "skill", `${actor.name} 公开为肚皮舞娘`, actor.id);
         if (payload.triggerGlobalSwap && state.settings.extensions.bellyDancerGlobalSwap) {
           this.performGlobalHiddenSwap(state);
-          this.addLog(state, "skill", "Belly Dancer triggered global hidden-card swap.", actor.id);
+          this.addLog(state, "skill", "肚皮舞娘触发了全场暗牌交换。", actor.id);
         }
         break;
       }
@@ -691,7 +723,7 @@ export class GameEngine {
     }
     const loaded = await this.stateStore.load(roomId);
     if (!loaded) {
-      throw new GameError("ROOM_NOT_FOUND", "Room does not exist.");
+      throw new GameError("ROOM_NOT_FOUND", "房间不存在。");
     }
     const room: ActiveRoom = {
       state: loaded,
@@ -705,7 +737,7 @@ export class GameEngine {
   private resolvePlayerId(room: ActiveRoom, socketId: string): string {
     const playerId = room.playerBySocketId.get(socketId);
     if (!playerId) {
-      throw new GameError("NOT_IN_ROOM", "Socket is not bound to this room.");
+      throw new GameError("NOT_IN_ROOM", "当前连接不在该房间内。");
     }
     return playerId;
   }
@@ -713,7 +745,7 @@ export class GameEngine {
   private getPlayerOrThrow(state: GameState, playerId: string): PlayerState {
     const player = state.players[playerId];
     if (!player) {
-      throw new GameError("PLAYER_NOT_FOUND", "Player not found.");
+      throw new GameError("PLAYER_NOT_FOUND", "玩家不存在。");
     }
     return player;
   }
@@ -724,26 +756,26 @@ export class GameEngine {
 
   private assertActionTurn(state: GameState, actorId: string, action: string): void {
     if (state.phase !== "in_game") {
-      throw new GameError("GAME_NOT_RUNNING", "Game is not running.");
+      throw new GameError("GAME_NOT_RUNNING", "游戏尚未开始。");
     }
     if (state.winner) {
-      throw new GameError("GAME_FINISHED", "Game already finished.");
+      throw new GameError("GAME_FINISHED", "本局已经结束。");
     }
     const currentId = this.currentPlayerId(state);
     if (currentId !== actorId) {
-      throw new GameError("NOT_YOUR_TURN", `It's not your turn. Expected ${currentId}.`);
+      throw new GameError("NOT_YOUR_TURN", `还没轮到你行动，当前应由 ${currentId} 行动。`);
     }
     const actor = this.getPlayerOrThrow(state, actorId);
     if (!actor.alive) {
-      throw new GameError("ACTOR_DEAD", "Dead players cannot act.");
+      throw new GameError("ACTOR_DEAD", "死亡玩家不能行动。");
     }
     if (actor.skipActions > 0) {
-      throw new GameError("PLAYER_DETAINED", "You are detained and cannot act.");
+      throw new GameError("PLAYER_DETAINED", "你已被拘留，暂时不能行动。");
     }
     if (!actor.connected) {
-      throw new GameError("PLAYER_OFFLINE", "Disconnected players cannot act.");
+      throw new GameError("PLAYER_OFFLINE", "离线玩家不能行动。");
     }
-    this.addLog(state, "system", `${actor.name} performs action ${action}`, actor.id);
+    this.addLog(state, "system", `${actor.name} 执行了动作：${actionNameZh(action)}`, actor.id);
   }
 
   private addLog(
@@ -816,10 +848,10 @@ export class GameEngine {
 
   private assertValidName(name: string): void {
     if (!name || !name.trim()) {
-      throw new GameError("INVALID_NAME", "Player name is required.");
+      throw new GameError("INVALID_NAME", "玩家昵称不能为空。");
     }
     if (name.trim().length > 24) {
-      throw new GameError("INVALID_NAME", "Player name is too long.");
+      throw new GameError("INVALID_NAME", "玩家昵称过长（最多 24 个字符）。");
     }
   }
 
@@ -853,7 +885,7 @@ export class GameEngine {
     }
 
     const current = state.players[this.currentPlayerId(state)];
-    this.addLog(state, "turn", `Round ${state.turn.round}, turn of ${current.name}.`);
+    this.addLog(state, "turn", `第 ${state.turn.round} 轮，轮到 ${current.name} 行动。`);
   }
 
   private consumeSkippedTurns(state: GameState): void {
@@ -861,13 +893,13 @@ export class GameEngine {
       const playerId = this.currentPlayerId(state);
       const player = state.players[playerId];
       if (!player.alive) {
-        this.addLog(state, "turn", `${player.name} is dead. Turn skipped.`, player.id);
+        this.addLog(state, "turn", `${player.name} 已死亡，回合自动跳过。`, player.id);
         this.advanceTurn(state);
         continue;
       }
       if (player.skipActions > 0) {
         player.skipActions -= 1;
-        this.addLog(state, "turn", `${player.name} is detained and skips this turn.`, player.id);
+        this.addLog(state, "turn", `${player.name} 处于拘留状态，本回合被跳过。`, player.id);
         this.advanceTurn(state);
         continue;
       }
@@ -877,7 +909,7 @@ export class GameEngine {
 
   private checkWin(state: GameState): { winnerFaction: WinFaction; reason: string } | null {
     if (state.effects.sultanKilledByAssassin) {
-      return { winnerFaction: "rebels", reason: "Assassin eliminated Sultan." };
+      return { winnerFaction: "rebels", reason: "刺客成功刺杀苏丹。" };
     }
 
     const slaveFlags = state.seatOrder.map((playerId) => {
@@ -885,7 +917,7 @@ export class GameEngine {
       return player.alive && player.card.faceUp && player.card.role === "slave";
     });
     if (countCircularMaxRun(slaveFlags) >= 3) {
-      return { winnerFaction: "rebels", reason: "Three adjacent face-up slaves triggered uprising." };
+      return { winnerFaction: "rebels", reason: "三张相邻且公开的奴隶触发起义成功。" };
     }
 
     if (state.effects.sultanPlayerId && state.effects.sultanCrownedRound !== undefined) {
@@ -897,7 +929,7 @@ export class GameEngine {
         sultan.card.role === "sultan" &&
         state.turn.round > state.effects.sultanCrownedRound
       ) {
-        return { winnerFaction: "loyalists", reason: "Crowned Sultan survived a full round." };
+        return { winnerFaction: "loyalists", reason: "苏丹公开后成功存活整整一轮。" };
       }
     }
 
@@ -927,7 +959,7 @@ export class GameEngine {
       endedAt: Date.now(),
     };
     state.phase = "finished";
-    this.addLog(state, "win", `${faction} win: ${reason}`);
+    this.addLog(state, "win", `${factionNameZh(faction)}获胜：${reason}`);
   }
 
   private areAdjacent(state: GameState, leftId: string, rightId: string): boolean {
