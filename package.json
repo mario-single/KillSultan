@@ -1,0 +1,23 @@
+{
+  "name": "sultan-online",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "packages/shared",
+    "apps/server",
+    "apps/client"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm:dev:shared\" \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:shared": "npm --workspace @sultan/shared run build -- --watch",
+    "dev:server": "npm --workspace @sultan/server run dev",
+    "dev:client": "npm --workspace @sultan/client run dev",
+    "pretypecheck": "npm --workspace @sultan/shared run build",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "typescript": "^5.9.3"
+  }
+}
