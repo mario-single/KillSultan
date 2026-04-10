@@ -1,18 +1,9 @@
-import {
-  CardState,
-  GameSettings,
-  MAX_PLAYERS,
-  MIN_PLAYERS,
-  Role,
-} from "@sultan/shared";
+import { CardState, GameSettings, MAX_PLAYERS, MIN_PLAYERS, Role } from "@sultan/shared";
 
 const BASE_SETTINGS: GameSettings = {
   minPlayers: MIN_PLAYERS,
   maxPlayers: MAX_PLAYERS,
   revealLogLimit: 100,
-  extensions: {
-    bellyDancerGlobalSwap: false,
-  },
 };
 
 export function defaultSettings(): GameSettings {
@@ -21,16 +12,17 @@ export function defaultSettings(): GameSettings {
 
 export function buildDeck(playerCount: number): Role[] {
   const totalCards = playerCount + 1;
-  const deck: Role[] = ["sultan", "assassin", "oracle", "belly_dancer"];
+  const deck: Role[] = ["sultan", "assassin", "guard", "slave"];
+  const neutrals: Role[] = ["oracle", "belly_dancer", "slave_trader", "grand_official"];
 
-  if (deck.length < totalCards) {
-    deck.push("guard");
-  }
-  if (deck.length < totalCards) {
-    deck.push("slave");
+  for (const neutral of neutrals) {
+    if (deck.length >= totalCards) {
+      break;
+    }
+    deck.push(neutral);
   }
 
-  // 剩余卡牌按守卫/奴隶交替填充，保证大局人数下仍有阵营对抗张力。
+  // 剩余卡牌按守卫/奴隶交替补足，保证对抗强度。
   let toggle: Role = "slave";
   while (deck.length < totalCards) {
     deck.push(toggle);

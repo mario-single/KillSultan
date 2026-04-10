@@ -165,6 +165,12 @@ button:disabled {
   background: var(--primary-2);
 }
 
+.btn-outline {
+  background: transparent;
+  color: var(--primary-2);
+  border-color: rgba(47, 122, 97, 0.52);
+}
+
 .row {
   display: flex;
   gap: 8px;
@@ -366,6 +372,51 @@ button:disabled {
 .errors p {
   margin: 4px 0;
   color: #902e2d;
+}
+
+.rulebook-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(18, 13, 9, 0.52);
+  display: grid;
+  place-items: center;
+  z-index: 50;
+  padding: 20px;
+}
+
+.rulebook-modal {
+  width: min(960px, 100%);
+  max-height: 86vh;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 251, 242, 0.98);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+}
+
+.rulebook-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.rulebook-head h3 {
+  margin: 0;
+}
+
+.rulebook-content {
+  margin: 0;
+  padding: 14px;
+  white-space: pre-wrap;
+  overflow: auto;
+  line-height: 1.7;
+  color: var(--ink);
+  font-family: "Noto Sans SC", "Microsoft YaHei UI", sans-serif;
 }
 
 @media (max-width: 720px) {

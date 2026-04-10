@@ -10,6 +10,8 @@ export function roleBaseFaction(role: Role): WinFaction | "neutral" {
       return "rebels";
     case "oracle":
     case "belly_dancer":
+    case "slave_trader":
+    case "grand_official":
       return "neutral";
     default:
       return "neutral";

@@ -11,7 +11,9 @@ export type Role =
   | "guard"
   | "slave"
   | "oracle"
-  | "belly_dancer";
+  | "belly_dancer"
+  | "slave_trader"
+  | "grand_official";
 
 export interface CardState {
   role: Role;
@@ -72,21 +74,20 @@ export interface GameSettings {
   minPlayers: number;
   maxPlayers: number;
   revealLogLimit: number;
-  extensions: {
-    bellyDancerGlobalSwap: boolean;
-  };
 }
 
 export interface GameEffects {
   sultanCrownedRound?: number;
   sultanPlayerId?: string;
   sultanKilledByAssassin?: boolean;
+  assassinKillerPlayerId?: string;
 }
 
 export interface WinResult {
   winnerFaction: WinFaction;
   winners: string[];
   reason: string;
+  scoreByPlayerId?: Record<string, number>;
   endedAt: number;
 }
 
@@ -149,12 +150,22 @@ export interface PlayerScopedState {
 export interface ActionRevealPayload {
   targetPlayerId?: string;
   followerIds?: string[];
+  slaveTraderTargets?: string[];
   oraclePrediction?: WinFaction;
   inspectSubjects?: Array<
     | { subjectType: "player"; subjectId: string }
     | { subjectType: "center"; subjectId: "center" }
   >;
-  triggerGlobalSwap?: boolean;
+  forceSkill?: {
+    targetPlayerId?: string;
+    followerIds?: string[];
+    slaveTraderTargets?: string[];
+    oraclePrediction?: WinFaction;
+    inspectSubjects?: Array<
+      | { subjectType: "player"; subjectId: string }
+      | { subjectType: "center"; subjectId: "center" }
+    >;
+  };
 }
 
 export interface ServerActionPayloadMap {

@@ -5,6 +5,8 @@
 ## 文档入口
 
 - 新手开局指南（简体中文）：[docs/quickstart-zh.md](docs/quickstart-zh.md)
+- 玩家规则手册（Markdown）：[docs/玩家规则手册.md](docs/玩家规则手册.md)
+- 玩家规则手册（DOCX）：[docs/玩家规则手册.docx](docs/玩家规则手册.docx)
 - 角色图标命名规范（简体中文）：[apps/client/public/assets/roles/命名规范.txt](apps/client/public/assets/roles/命名规范.txt)
 
 ## 技术栈
@@ -43,6 +45,7 @@ http://localhost:3000
 
 - `npm run dev`：启动全部开发进程
 - `npm run typecheck`：检查所有工作区类型
+- `npm run rulebook:docx`：从 Markdown 生成 DOCX 规则手册
 - `npm --workspace @sultan/server run build`：仅构建服务端
 - `npm --workspace @sultan/client run typecheck`：仅检查客户端类型
 
@@ -55,6 +58,7 @@ http://localhost:3000
 - 角色技能：苏丹、刺客、守卫、奴隶、占卜师、肚皮舞娘（含扩展开关）
 - 信息隔离：暗牌不会广播给无权限客户端
 - 日志系统：广播动作过程，私密结果通过单播通知
+- 规则查看：网站内可点击“查看规则”弹窗随时查看完整手册
 
 ## Redis（可选）
 

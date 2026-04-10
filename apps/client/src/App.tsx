@@ -76,6 +76,8 @@ export function App() {
   const [占卜阵营, set占卜阵营] = useState<WinFaction>("rebels");
   const [跟随者输入, set跟随者输入] = useState("");
   const [触发全场交换, set触发全场交换] = useState(false);
+  const [规则弹窗打开, set规则弹窗打开] = useState(false);
+  const [规则文本, set规则文本] = useState("规则加载中...");
 
   useEffect(() => {
     const socket: ClientSocket = io(SERVER_URL, { transports: ["websocket"] });
@@ -130,6 +132,30 @@ export function App() {
     return () => {
       socket.disconnect();
       socketRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    fetch("/docs/玩家规则手册.md")
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error("规则文件加载失败");
+        }
+        return res.text();
+      })
+      .then((text) => {
+        if (mounted) {
+          set规则文本(text);
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          set规则文本("规则文档暂时不可用，请联系房主查看 docs/玩家规则手册.md。");
+        }
+      });
+    return () => {
+      mounted = false;
     };
   }, []);
 
@@ -327,10 +353,18 @@ export function App() {
             <button className="btn-secondary" onClick={加入房间}>
               加入房间
             </button>
+            <button className="btn-outline" onClick={() => set规则弹窗打开(true)}>
+              查看规则
+            </button>
           </div>
           <p className="tip">提示：同一台电脑可开多个无痕窗口，快速模拟多人测试。</p>
         </div>
         <错误面板 errors={错误列表} />
+        <规则弹窗
+          打开={规则弹窗打开}
+          内容={规则文本}
+          关闭={() => set规则弹窗打开(false)}
+        />
       </div>
     );
   }
@@ -351,6 +385,9 @@ export function App() {
         </div>
         <div className="topbar-meta">
           <span>你是：{我?.name}</span>
+          <button className="btn-outline" onClick={() => set规则弹窗打开(true)}>
+            查看规则
+          </button>
           <button className="btn-secondary" onClick={离开房间}>
             退出房间
           </button>
@@ -524,6 +561,11 @@ export function App() {
       </section>
 
       <错误面板 errors={错误列表} />
+      <规则弹窗
+        打开={规则弹窗打开}
+        内容={规则文本}
+        关闭={() => set规则弹窗打开(false)}
+      />
     </div>
   );
 }
@@ -552,5 +594,24 @@ function 错误面板(props: { errors: string[] }) {
         <p key={`${error}-${index}`}>{error}</p>
       ))}
     </section>
+  );
+}
+
+function 规则弹窗(props: { 打开: boolean; 内容: string; 关闭: () => void }) {
+  if (!props.打开) {
+    return null;
+  }
+  return (
+    <div className="rulebook-mask" onClick={props.关闭}>
+      <section className="rulebook-modal" onClick={(e) => e.stopPropagation()}>
+        <header className="rulebook-head">
+          <h3>游戏规则说明</h3>
+          <button className="btn-outline" onClick={props.关闭}>
+            关闭
+          </button>
+        </header>
+        <pre className="rulebook-content">{props.内容}</pre>
+      </section>
+    </div>
   );
 }
