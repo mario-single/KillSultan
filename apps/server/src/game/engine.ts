@@ -438,20 +438,35 @@ export class GameEngine {
     const room = await this.getRoomOrThrow(roomId);
     const actorId = this.resolvePlayerId(room, socketId);
     const state = room.state;
-    this.assertActionTurn(state, actorId, "reveal");
-
     const actor = this.getPlayerOrThrow(state, actorId);
-    if (actor.card.faceUp) {
-      throw new GameError("ALREADY_REVEALED", "该身份牌已经公开。");
+
+    const isSultan = actor.card.role === "sultan";
+    const crownAnytime = this.canSultanCrownAnytime(state, actor, payload);
+
+    if (!crownAnytime) {
+      this.assertActionTurn(state, actorId, "reveal");
     }
 
-    actor.card.faceUp = true;
-    actor.card.version += 1;
-    this.addLog(state, "reveal", `${actor.name} 公开了身份牌`, actor.id);
+    if (actor.card.faceUp) {
+      if (!isSultan) {
+        throw new GameError("ALREADY_REVEALED", "该身份牌已经公开。");
+      }
+      if (!payload.targetPlayerId) {
+        throw new GameError("MISSING_TARGET", "苏丹已公开，轮到你时可指定处决目标。");
+      }
+    } else {
+      actor.card.faceUp = true;
+      actor.card.version += 1;
+      this.addLog(state, "reveal", `${actor.name} 公开了身份牌`, actor.id);
+    }
 
     const privateNotice = this.executeRoleSkill(state, actor.id, payload, false, 0);
 
-    this.finishActionAndAdvance(state);
+    if (!crownAnytime) {
+      this.finishActionAndAdvance(state);
+    } else {
+      this.addLog(state, "skill", `${actor.name} 在非自己回合完成了加冕公开。`, actor.id);
+    }
     this.markUpdated(state);
     await this.persist(room);
     return {
@@ -530,9 +545,11 @@ export class GameEngine {
 
     switch (actor.card.role) {
       case "sultan": {
-        state.effects.sultanPlayerId = actor.id;
-        state.effects.sultanCrownedRound = state.turn.round;
-        this.addLog(state, "skill", `${actor.name} 完成加冕，成为明牌苏丹`, actor.id);
+        if (state.effects.sultanPlayerId !== actor.id || state.effects.sultanCrownedRound === undefined) {
+          state.effects.sultanPlayerId = actor.id;
+          state.effects.sultanCrownedRound = state.turn.round;
+          this.addLog(state, "skill", `${actor.name} 完成加冕，成为明牌苏丹`, actor.id);
+        }
         if (payload.targetPlayerId) {
           const target = this.getPlayerOrThrow(state, payload.targetPlayerId);
           if (!target.card.faceUp && fail("INVALID_EXECUTION_TARGET", "苏丹只能处决已公开目标。")) {
@@ -787,6 +804,32 @@ export class GameEngine {
 
   private currentPlayerId(state: GameState): string {
     return state.seatOrder[state.turn.currentSeatIndex];
+  }
+
+  private canSultanCrownAnytime(
+    state: GameState,
+    actor: PlayerState,
+    payload: ActionRevealPayload,
+  ): boolean {
+    if (state.phase !== "in_game" || state.winner) {
+      return false;
+    }
+    if (actor.card.role !== "sultan") {
+      return false;
+    }
+    if (actor.card.faceUp) {
+      return false;
+    }
+    if (!actor.alive) {
+      throw new GameError("ACTOR_DEAD", "死亡玩家不能行动。");
+    }
+    if (!actor.connected) {
+      throw new GameError("PLAYER_OFFLINE", "离线玩家不能行动。");
+    }
+    if (payload.targetPlayerId) {
+      throw new GameError("NOT_YOUR_TURN", "苏丹非自己回合只能公开身份，不能处决目标。");
+    }
+    return true;
   }
 
   private assertActionTurn(state: GameState, actorId: string, action: string): void {

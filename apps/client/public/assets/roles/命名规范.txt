@@ -1,4 +1,4 @@
-请把角色图片放在本目录，文件名必须与以下名称完全一致：
+﻿请把角色图片放在本目录，文件名必须与以下名称完全一致：
 
 1. sultan.png
 2. assassin.png
@@ -8,15 +8,31 @@
 6. belly_dancer.png
 7. slave_trader.png
 8. grand_official.png
+9. back.png（统一卡背）
 
-可选补充图片（非必需）：
+UI 资源文件（固定命名）：
+
+1. logo.png（首页 Logo）
+2. logo2.png（游戏页横版 Logo）
+
+小图头像资源（固定命名，给小尺寸展示使用）：
+
+1. s_sultan.png
+2. s_assassin.png
+3. s_guard.png
+4. s_slave.png
+5. s_oracle.png
+6. s_belly_dancer.png
+7. s_slave_trader.png
+8. s_grand_official.png
+
+可选补充图片（非必须）：
 
 1. unknown.png
 2. center.png
 
 建议规格：
-
 - 格式：PNG（透明背景优先）
 - 建议尺寸：512x512 或 1024x1024
-- 构图：主体居中，四周留一定边距
+- 构图：主体居中，四周保留一定边距
 - 风格：同一套色彩和光影风格，避免混搭

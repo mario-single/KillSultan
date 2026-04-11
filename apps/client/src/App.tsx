@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 import {
   AckResult,
@@ -13,18 +13,39 @@ const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? "http://localhost:3000";
 const TOKEN_KEY = "sultan_token";
 const ROOM_KEY = "sultan_room_id";
 const NAME_KEY = "sultan_name";
+const BACK_ICON = "/assets/roles/back.png";
+const LOGO_ICON = "/assets/roles/logo.png";
+const LOGO_WIDE = "/assets/roles/logo2.png";
+
+const NOTE_OPTIONS = ["", "疑似苏丹", "疑似刺客", "疑似守卫", "疑似奴隶", "重点观察"] as const;
+type NoteText = (typeof NOTE_OPTIONS)[number];
 
 type ClientSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
-const ROLE_META: Record<Role, { name: string; short: string; icon: string }> = {
-  sultan: { name: "苏丹", short: "苏", icon: "/assets/roles/sultan.png" },
-  assassin: { name: "刺客", short: "刺", icon: "/assets/roles/assassin.png" },
-  guard: { name: "守卫", short: "卫", icon: "/assets/roles/guard.png" },
-  slave: { name: "奴隶", short: "奴", icon: "/assets/roles/slave.png" },
-  oracle: { name: "占卜师", short: "卜", icon: "/assets/roles/oracle.png" },
-  belly_dancer: { name: "肚皮舞娘", short: "舞", icon: "/assets/roles/belly_dancer.png" },
-  slave_trader: { name: "奴隶贩子", short: "贩", icon: "/assets/roles/slave_trader.png" },
-  grand_official: { name: "大官", short: "官", icon: "/assets/roles/grand_official.png" },
+const ROLE_META: Record<Role, { name: string; short: string; icon: string; iconSmall: string }> = {
+  sultan: { name: "苏丹", short: "苏", icon: "/assets/roles/sultan.png", iconSmall: "/assets/roles/s_sultan.png" },
+  assassin: { name: "刺客", short: "刺", icon: "/assets/roles/assassin.png", iconSmall: "/assets/roles/s_assassin.png" },
+  guard: { name: "守卫", short: "卫", icon: "/assets/roles/guard.png", iconSmall: "/assets/roles/s_guard.png" },
+  slave: { name: "奴隶", short: "奴", icon: "/assets/roles/slave.png", iconSmall: "/assets/roles/s_slave.png" },
+  oracle: { name: "占卜师", short: "卜", icon: "/assets/roles/oracle.png", iconSmall: "/assets/roles/s_oracle.png" },
+  belly_dancer: {
+    name: "肚皮舞娘",
+    short: "舞",
+    icon: "/assets/roles/belly_dancer.png",
+    iconSmall: "/assets/roles/s_belly_dancer.png",
+  },
+  slave_trader: {
+    name: "奴隶贩子",
+    short: "贩",
+    icon: "/assets/roles/slave_trader.png",
+    iconSmall: "/assets/roles/s_slave_trader.png",
+  },
+  grand_official: {
+    name: "大官",
+    short: "官",
+    icon: "/assets/roles/grand_official.png",
+    iconSmall: "/assets/roles/s_grand_official.png",
+  },
 };
 
 const RULE_CARDS: Array<{ title: string; desc: string }> = [
@@ -100,6 +121,54 @@ function parseCommaIds(input: string): string[] {
     .filter(Boolean);
 }
 
+function toCommaInput(ids: string[]): string {
+  return ids.join(",");
+}
+
+function areAdjacentSeats(a: number, b: number, total: number): boolean {
+  if (total <= 1) {
+    return false;
+  }
+  const diff = Math.abs(a - b);
+  return diff === 1 || diff === total - 1;
+}
+
+function seatPosition(index: number, total: number): { left: string; top: string } {
+  const angle = -Math.PI / 2 + (2 * Math.PI * index) / Math.max(total, 1);
+  const radius = total <= 6 ? 34 : total <= 10 ? 39 : 42;
+  return {
+    left: `${50 + Math.cos(angle) * radius}%`,
+    top: `${50 + Math.sin(angle) * radius}%`,
+  };
+}
+
+function roleNeedTarget(role?: Role): boolean {
+  return role === "assassin" || role === "guard" || role === "grand_official";
+}
+
+function roleSkillLabel(role?: Role, canFollowUprising = false): string {
+  switch (role) {
+    case "sultan":
+      return "公开身份";
+    case "assassin":
+      return "刺杀目标";
+    case "guard":
+      return "拘留目标";
+    case "slave":
+      return canFollowUprising ? "跟随起义" : "发起起义";
+    case "oracle":
+      return "公开并占卜";
+    case "belly_dancer":
+      return "公开身份";
+    case "slave_trader":
+      return "发动链式筛查";
+    case "grand_official":
+      return "强制目标执行技能";
+    default:
+      return "公开身份并触发技能";
+  }
+}
+
 export function App() {
   const socketRef = useRef<ClientSocket | null>(null);
 
@@ -112,10 +181,11 @@ export function App() {
   const [privateFeed, setPrivateFeed] = useState<string[]>([]);
 
   const [selectedTarget, setSelectedTarget] = useState("");
+  const [noteEditorFor, setNoteEditorFor] = useState("");
+  const [notesByPlayerId, setNotesByPlayerId] = useState<Record<string, NoteText>>({});
   const [forceSkillTarget, setForceSkillTarget] = useState("");
   const [oraclePrediction, setOraclePrediction] = useState<WinFaction>("rebels");
   const [forceOraclePrediction, setForceOraclePrediction] = useState<WinFaction>("rebels");
-  const [followerInput, setFollowerInput] = useState("");
   const [slaveTraderTargetsInput, setSlaveTraderTargetsInput] = useState("");
   const [forceSlaveTraderTargetsInput, setForceSlaveTraderTargetsInput] = useState("");
   const [showRuleModal, setShowRuleModal] = useState(false);
@@ -164,12 +234,102 @@ export function App() {
   const publicState = scopedState?.publicState;
   const privateState = scopedState?.privateState;
   const currentPlayerId = publicState?.currentPlayerId;
+  const playersOrdered = useMemo(() => {
+    if (!publicState) {
+      return [];
+    }
+    return [...publicState.players].sort((a, b) => a.seatIndex - b.seatIndex);
+  }, [publicState]);
+  const targetPlayers = playersOrdered.filter((player) => player.id !== myPlayerId);
+  const selectedTargetPlayer = targetPlayers.find((player) => player.id === selectedTarget);
   const isMyTurn = currentPlayerId === myPlayerId;
   const me = publicState?.players.find((player) => player.id === myPlayerId);
-  const currentActor = publicState?.players.find((player) => player.id === currentPlayerId);
+  const currentActor = playersOrdered.find((player) => player.id === currentPlayerId);
+  const myRole = privateState?.selfRole;
+
+  const noteStorageKey = publicState && myPlayerId ? `killsultan_notes_${publicState.roomId}_${myPlayerId}` : "";
+
+  useEffect(() => {
+    if (!noteStorageKey) {
+      return;
+    }
+    const raw = localStorage.getItem(noteStorageKey);
+    if (!raw) {
+      setNotesByPlayerId({});
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw) as Record<string, NoteText>;
+      setNotesByPlayerId(parsed);
+    } catch {
+      setNotesByPlayerId({});
+    }
+  }, [noteStorageKey]);
+
+  useEffect(() => {
+    if (!noteStorageKey) {
+      return;
+    }
+    localStorage.setItem(noteStorageKey, JSON.stringify(notesByPlayerId));
+  }, [noteStorageKey, notesByPlayerId]);
+
+  useEffect(() => {
+    if (!publicState) {
+      return;
+    }
+    setNotesByPlayerId((prev) => {
+      const allowed = new Set(publicState.players.map((player) => player.id));
+      const next: Record<string, NoteText> = {};
+      for (const [key, value] of Object.entries(prev)) {
+        if (allowed.has(key)) {
+          next[key] = value;
+        }
+      }
+      return next;
+    });
+  }, [publicState]);
 
   function addError(message: string): void {
     setErrors((prev) => [message, ...prev].slice(0, 20));
+  }
+
+  function openSeatOverlay(playerId: string): void {
+    if (playerId !== myPlayerId) {
+      setSelectedTarget(playerId);
+    }
+    setNoteEditorFor((prev) => (prev === playerId ? "" : playerId));
+  }
+
+  function setSeatNote(playerId: string, note: NoteText): void {
+    setNotesByPlayerId((prev) => {
+      const next = { ...prev };
+      if (!note) {
+        delete next[playerId];
+      } else {
+        next[playerId] = note;
+      }
+      return next;
+    });
+  }
+
+  function toggleCsvId(csv: string, id: string, setter: (next: string) => void): void {
+    const current = parseCommaIds(csv);
+    if (current.includes(id)) {
+      setter(toCommaInput(current.filter((item) => item !== id)));
+      return;
+    }
+    setter(toCommaInput([...current, id]));
+  }
+
+  function addSelectedTargetToCsv(csv: string, setter: (next: string) => void): void {
+    if (!selectedTarget) {
+      return;
+    }
+    const current = parseCommaIds(csv);
+    if (current.includes(selectedTarget)) {
+      return;
+    }
+    setter(toCommaInput([...current, selectedTarget]));
   }
 
   function createRoom(): void {
@@ -293,28 +453,54 @@ export function App() {
 
   function doReveal(): void {
     const socket = socketRef.current;
-    if (!socket || !publicState) {
+    if (!socket || !publicState || !myRole) {
       return;
     }
-    const followers = parseCommaIds(followerInput);
     const slaveTraderTargets = parseCommaIds(slaveTraderTargetsInput);
     const forceSlaveTraderTargets = parseCommaIds(forceSlaveTraderTargetsInput);
 
-    socket.emit(
-      "action:reveal",
-      {
-        roomId: publicState.roomId,
-        targetPlayerId: selectedTarget || undefined,
-        followerIds: followers.length > 0 ? followers : undefined,
-        slaveTraderTargets: slaveTraderTargets.length > 0 ? slaveTraderTargets : undefined,
-        oraclePrediction,
-        forceSkill: {
+    const sultanExecution = myRole === "sultan" && !!privateState?.selfCardFaceUp;
+    if ((roleNeedTarget(myRole) || sultanExecution) && !selectedTarget) {
+      addError("请先选择目标玩家。");
+      return;
+    }
+
+    const payload: any = {
+      roomId: publicState.roomId,
+    };
+
+    switch (myRole) {
+      case "sultan":
+        payload.targetPlayerId = selectedTarget || undefined;
+        break;
+      case "assassin":
+      case "guard":
+        payload.targetPlayerId = selectedTarget;
+        break;
+      case "slave":
+        payload.followerIds = undefined;
+        break;
+      case "oracle":
+        payload.oraclePrediction = oraclePrediction;
+        break;
+      case "slave_trader":
+        payload.slaveTraderTargets = slaveTraderTargets.length > 0 ? slaveTraderTargets : undefined;
+        break;
+      case "grand_official":
+        payload.targetPlayerId = selectedTarget;
+        payload.forceSkill = {
           targetPlayerId: forceSkillTarget || undefined,
-          followerIds: followers.length > 0 ? followers : undefined,
           slaveTraderTargets: forceSlaveTraderTargets.length > 0 ? forceSlaveTraderTargets : undefined,
           oraclePrediction: forceOraclePrediction,
-        },
-      },
+        };
+        break;
+      default:
+        break;
+    }
+
+    socket.emit(
+      "action:reveal",
+      payload,
       (result) => {
         if (!result.ok) {
           addError(`${result.error.code}: ${result.error.message}`);
@@ -332,7 +518,10 @@ export function App() {
       setScopedState(null);
       setMyPlayerId("");
       setSelectedTarget("");
+      setNoteEditorFor("");
       setForceSkillTarget("");
+      setSlaveTraderTargetsInput("");
+      setForceSlaveTraderTargetsInput("");
       localStorage.removeItem(ROOM_KEY);
     });
   }
@@ -341,6 +530,7 @@ export function App() {
     return (
       <div className="shell">
         <div className="hero">
+          <img className="hero-logo" src={LOGO_ICON} alt="刺杀苏丹王 Logo" />
           <p className="hero-badge">多人实时策略 · 身份隐藏 · 阵营摇摆</p>
           <h1>刺杀苏丹王 KillSultan</h1>
           <p>输入昵称即可开房，邀请朋友输入房间号加入。</p>
@@ -370,14 +560,38 @@ export function App() {
     );
   }
 
-  const actionDisabled = publicState.phase !== "in_game" || !isMyTurn;
-  const myRole = privateState?.selfRole;
+  const actionDisabled = publicState.phase !== "in_game" || !isMyTurn || !me?.alive || (me?.skipActions ?? 0) > 0;
   const myRoleMeta = myRole ? ROLE_META[myRole] : undefined;
+  const canAnytimeCrown =
+    myRole === "sultan" &&
+    publicState.phase === "in_game" &&
+    !!me?.alive &&
+    !privateState?.selfCardFaceUp;
+  const revealNeedTarget = roleNeedTarget(myRole) || (myRole === "sultan" && !!privateState?.selfCardFaceUp);
+  const revealDisabled = canAnytimeCrown ? false : actionDisabled || (revealNeedTarget && !selectedTarget);
+  const revealLabel =
+    myRole === "sultan"
+      ? privateState?.selfCardFaceUp
+        ? "处决目标（苏丹回合）"
+        : "公开身份（可随时）"
+      : roleSkillLabel(myRole, false);
+  const canFollowUprising =
+    myRole === "slave" &&
+    !!me &&
+    me.alive &&
+    !privateState?.selfCardFaceUp &&
+    playersOrdered.some(
+      (player) =>
+        player.alive &&
+        player.revealedRole === "slave" &&
+        areAdjacentSeats(player.seatIndex, me.seatIndex, playersOrdered.length),
+    );
 
   return (
     <div className="shell">
       <header className="topbar">
-        <div>
+        <div className="game-head">
+          <img className="game-logo-wide" src={LOGO_WIDE} alt="刺杀苏丹王" />
           <h1>房间 {publicState.roomId}</h1>
           <p className="topbar-sub">
             阶段：{publicState.phase === "lobby" ? "准备阶段" : publicState.phase === "in_game" ? "游戏中" : "已结束"}
@@ -394,66 +608,68 @@ export function App() {
         </div>
       </header>
 
-      <section className="grid">
-        <article className="panel panel-role">
-          <h2>我的身份</h2>
-          {myRole && myRoleMeta ? (
-            <div className="my-role-card">
-              <RoleAvatar role={myRole} label={myRoleMeta.short} size="xl" />
-              <div>
-                <p className="role-name">{myRoleMeta.name}</p>
-                <p className="role-faction">
-                  {roleFactionName(myRole, Boolean(privateState?.selfCardFaceUp))}
-                  {privateState?.selfCardFaceUp ? " · 已公开" : " · 暗置"}
-                </p>
-              </div>
-            </div>
-          ) : (
-            <p>尚未分配身份。</p>
-          )}
-          {publicState.phase === "in_game" ? (
-            <div className="turn-box">
+      <section className="play-layout">
+        <article className="panel table-panel">
+          <div className="table-panel-head">
+            <h2>圆桌显示区</h2>
+            <p>点击头像可选目标并备注，当前行动玩家高亮</p>
+          </div>
+          <div className="round-table">
+            <div className="table-center">
               <p>第 {publicState.turn.round} 轮</p>
               <p>当前行动：{currentActor?.name ?? "-"}</p>
-              <p>{isMyTurn ? "现在轮到你行动。" : "请等待其他玩家行动。"}</p>
             </div>
-          ) : null}
-          {publicState.winner ? (
-            <p className="winner">
-              胜利阵营：{factionName(publicState.winner.winnerFaction)} | {publicState.winner.reason}
-            </p>
-          ) : null}
-        </article>
-
-        <article className="panel">
-          <h2>玩家席位</h2>
-          <div className="players-grid">
-            {publicState.players.map((player) => {
+            {playersOrdered.map((player, index) => {
               const revealedRole = player.revealedRole;
               const current = player.id === currentPlayerId;
               const selected = player.id === selectedTarget;
+              const isSelf = player.id === myPlayerId;
+              const note = notesByPlayerId[player.id];
+              const showFront = player.alive && !!revealedRole;
+
               return (
-                <button
-                  key={player.id}
-                  className={`player-card ${current ? "current" : ""} ${selected ? "selected" : ""}`}
-                  onClick={() => setSelectedTarget(player.id)}
-                >
-                  <div className="player-head">
-                    <strong>{player.name}</strong>
-                    <span>{player.id === myPlayerId ? "我" : `座位${player.seatIndex + 1}`}</span>
+                <div key={player.id} className="seat-wrap" style={seatPosition(index, playersOrdered.length)}>
+                  <button
+                    className={`seat-btn ${current ? "current" : ""} ${selected ? "selected" : ""} ${!player.alive ? "dead" : ""}`}
+                    onClick={() => openSeatOverlay(player.id)}
+                  >
+                    <div className={`seat-card ${showFront ? "front" : "back"}`}>
+                      {showFront && revealedRole ? (
+                        <img src={ROLE_META[revealedRole].iconSmall} alt={ROLE_META[revealedRole].name} />
+                      ) : (
+                        <img src={BACK_ICON} alt="卡背" />
+                      )}
+                    </div>
+                  </button>
+                  <div className="seat-label">
+                    <strong>
+                      #{player.seatIndex + 1} {player.name}
+                    </strong>
+                    <span>{isSelf ? "你" : "玩家"} · {showFront ? "正面" : player.alive ? "背面" : "阵亡背面"}</span>
                   </div>
-                  {selected ? <div className="selected-tag">已选目标</div> : null}
-                  <div className="player-role">
-                    {revealedRole ? (
-                      <>
-                        <RoleAvatar role={revealedRole} label={ROLE_META[revealedRole].short} size="sm" />
-                        <span>{ROLE_META[revealedRole].name}</span>
-                      </>
-                    ) : (
-                      <span>暗置身份</span>
-                    )}
-                  </div>
-                </button>
+                  {current ? <span className="seat-current-tag">行动中</span> : null}
+                  {selected && !isSelf ? <span className="seat-target-tag">目标</span> : null}
+                  {note ? <span className="seat-note-tag">{note}</span> : null}
+                  {noteEditorFor === player.id ? (
+                    <div className="seat-note-pop">
+                      {NOTE_OPTIONS.map((option) => (
+                        <button
+                          key={option || "clear"}
+                          className={`note-btn ${option && option === note ? "active" : ""}`}
+                          onClick={() => {
+                            setSeatNote(player.id, option);
+                            if (!isSelf) {
+                              setSelectedTarget(player.id);
+                            }
+                            setNoteEditorFor("");
+                          }}
+                        >
+                          {option || "清空"}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
               );
             })}
           </div>
@@ -469,84 +685,155 @@ export function App() {
           ) : null}
         </article>
 
-        <article className="panel">
-          <h2>行动面板</h2>
-          <p className="tip">当前目标：{selectedTarget || "未选择"}</p>
-          <div className="row">
-            <button disabled={actionDisabled || !selectedTarget} onClick={doPeek}>
-              偷看
-            </button>
-            <button disabled={actionDisabled || !selectedTarget} onClick={doSwap}>
-              交换
-            </button>
-            <button disabled={actionDisabled} onClick={doSwapCenter}>
-              换中间牌
-            </button>
-          </div>
-          <label>占卜阵营（占卜师）</label>
-          <select value={oraclePrediction} onChange={(e) => setOraclePrediction(e.target.value as WinFaction)} disabled={actionDisabled}>
-            <option value="rebels">革命党</option>
-            <option value="loyalists">保皇派</option>
-          </select>
-          <label>奴隶跟随者 ID（逗号分隔）</label>
-          <input value={followerInput} onChange={(e) => setFollowerInput(e.target.value)} placeholder="a1,b2" />
-          <label>奴隶贩子链式目标 ID（逗号分隔）</label>
-          <input value={slaveTraderTargetsInput} onChange={(e) => setSlaveTraderTargetsInput(e.target.value)} placeholder="x1,x2,x3" />
-          <label>大官强制技能目标 ID</label>
-          <input value={forceSkillTarget} onChange={(e) => setForceSkillTarget(e.target.value)} placeholder="被强制技能作用的二级目标" />
-          <label>大官强制占卜阵营</label>
-          <select
-            value={forceOraclePrediction}
-            onChange={(e) => setForceOraclePrediction(e.target.value as WinFaction)}
-            disabled={actionDisabled}
-          >
-            <option value="rebels">革命党</option>
-            <option value="loyalists">保皇派</option>
-          </select>
-          <label>大官强制-奴隶贩子链式目标</label>
-          <input
-            value={forceSlaveTraderTargetsInput}
-            onChange={(e) => setForceSlaveTraderTargetsInput(e.target.value)}
-            placeholder="x1,x2"
-          />
-          <button disabled={actionDisabled} onClick={doReveal}>
-            公开身份并触发技能
-          </button>
-        </article>
+        <aside className="ops-sidebar">
+          <article className="panel panel-role">
+            <h2>我的身份</h2>
+            {myRole && myRoleMeta ? (
+              <div className="my-role-card">
+                <RoleAvatar role={myRole} label={myRoleMeta.short} size="xl" />
+                <div>
+                  <p className="role-name">{myRoleMeta.name}</p>
+                  <p className="role-faction">
+                    {roleFactionName(myRole, Boolean(privateState?.selfCardFaceUp))}
+                    {privateState?.selfCardFaceUp ? " · 已公开" : " · 暗置"}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <p>尚未分配身份。</p>
+            )}
+            <div className="turn-box">
+              <p>{isMyTurn ? "现在轮到你行动。" : "请等待其他玩家行动。"}</p>
+              <p>状态：{me?.alive ? "存活" : "阵亡"}</p>
+              <p>拘留：{(me?.skipActions ?? 0) > 0 ? `剩余 ${me?.skipActions} 次` : "无"}</p>
+            </div>
+          </article>
 
-        <article className="panel">
-          <h2>私密情报</h2>
-          <p>当前身份：{myRole ? ROLE_META[myRole].name : "-"}</p>
-          <p>牌面状态：{privateState?.selfCardFaceUp ? "已公开" : "暗置"}</p>
-          <p>占卜选择：{privateState?.oraclePrediction ? factionName(privateState.oraclePrediction) : "-"}</p>
-          <ul className="text-list">
-            {privateState?.privateKnowledge.map((note, index) => (
-              <li key={`${note.subjectType}-${note.subjectId}-${index}`}>
-                {note.source === "peek" ? "偷看" : "占卜"}看到
-                {note.subjectType === "center" ? "中间牌" : `玩家 ${note.subjectId}`}为
-                {ROLE_META[note.role].name}
-              </li>
-            ))}
-          </ul>
-        </article>
+          <article className="panel">
+            <h2>通用动作</h2>
+            <select value={selectedTarget} onChange={(e) => setSelectedTarget(e.target.value)}>
+              <option value="">-- 选择目标 --</option>
+              {targetPlayers.map((player) => (
+                <option key={player.id} value={player.id}>
+                  #{player.seatIndex + 1} {player.name}
+                </option>
+              ))}
+            </select>
+            <p className="tip">当前目标：{selectedTargetPlayer ? selectedTargetPlayer.name : "未选择"}</p>
+            <div className="row">
+              <button disabled={actionDisabled || !selectedTarget} onClick={doPeek}>
+                偷看
+              </button>
+              <button disabled={actionDisabled || !selectedTarget} onClick={doSwap}>
+                交换
+              </button>
+              <button disabled={actionDisabled} onClick={doSwapCenter}>
+                换中间牌
+              </button>
+            </div>
+          </article>
 
-        <article className="panel">
-          <h2>行动日志</h2>
-          <ul className="text-list">
-            {publicState.logs.map((log) => (
-              <li key={log.id}>{log.message}</li>
-            ))}
-          </ul>
-        </article>
+          <article className="panel skill-panel">
+            <h2>身份技能</h2>
+            <p className="skill-title">{revealLabel}</p>
+            {myRole === "oracle" ? (
+              <>
+                <label>预测阵营</label>
+                <select value={oraclePrediction} onChange={(e) => setOraclePrediction(e.target.value as WinFaction)}>
+                  <option value="rebels">革命党</option>
+                  <option value="loyalists">保皇派</option>
+                </select>
+              </>
+            ) : null}
+            {myRole === "slave" ? (
+              <p className="tip">{canFollowUprising ? "你满足跟随起义条件，可直接跟随。" : "你可直接发起起义。"}</p>
+            ) : null}
+            {myRole === "slave_trader" ? (
+              <>
+                <label>链式目标列表</label>
+                <input
+                  value={slaveTraderTargetsInput}
+                  onChange={(e) => setSlaveTraderTargetsInput(e.target.value)}
+                  placeholder="逗号分隔，或追加当前目标"
+                />
+                <div className="row">
+                  <button onClick={() => addSelectedTargetToCsv(slaveTraderTargetsInput, setSlaveTraderTargetsInput)}>追加当前目标</button>
+                  <button className="btn-outline" onClick={() => setSlaveTraderTargetsInput("")}>
+                    清空
+                  </button>
+                </div>
+              </>
+            ) : null}
+            {myRole === "grand_official" ? (
+              <>
+                <label>强制技能二级目标（可选）</label>
+                <select value={forceSkillTarget} onChange={(e) => setForceSkillTarget(e.target.value)}>
+                  <option value="">-- 不设置 --</option>
+                  {targetPlayers.map((player) => (
+                    <option key={player.id} value={player.id}>
+                      #{player.seatIndex + 1} {player.name}
+                    </option>
+                  ))}
+                </select>
+                <label>强制占卜阵营</label>
+                <select value={forceOraclePrediction} onChange={(e) => setForceOraclePrediction(e.target.value as WinFaction)}>
+                  <option value="rebels">革命党</option>
+                  <option value="loyalists">保皇派</option>
+                </select>
+                <label>强制-奴隶贩子链式目标</label>
+                <input
+                  value={forceSlaveTraderTargetsInput}
+                  onChange={(e) => setForceSlaveTraderTargetsInput(e.target.value)}
+                  placeholder="逗号分隔，或追加当前目标"
+                />
+                <div className="row">
+                  <button onClick={() => addSelectedTargetToCsv(forceSlaveTraderTargetsInput, setForceSlaveTraderTargetsInput)}>追加当前目标</button>
+                  <button className="btn-outline" onClick={() => setForceSlaveTraderTargetsInput("")}>
+                    清空
+                  </button>
+                </div>
+              </>
+            ) : null}
+            {roleNeedTarget(myRole) ? <p className="tip">该技能需要先选择目标。</p> : null}
+            <button disabled={revealDisabled} className={myRole === "assassin" ? "skill-fire is-kill" : "skill-fire"} onClick={doReveal}>
+              {revealLabel}
+            </button>
+          </article>
 
-        <article className="panel">
-          <h2>私密提示</h2>
-          <ul className="text-list">
-            {privateFeed.map((line, index) => (
-              <li key={`${line}-${index}`}>{line}</li>
-            ))}
-          </ul>
-        </article>
+          <article className="panel">
+            <h2>私密情报</h2>
+            <p>当前身份：{myRole ? ROLE_META[myRole].name : "-"}</p>
+            <p>牌面状态：{privateState?.selfCardFaceUp ? "已公开" : "暗置"}</p>
+            <p>占卜选择：{privateState?.oraclePrediction ? factionName(privateState.oraclePrediction) : "-"}</p>
+            <ul className="text-list">
+              {privateState?.privateKnowledge.map((note, index) => (
+                <li key={`${note.subjectType}-${note.subjectId}-${index}`}>
+                  {note.source === "peek" ? "偷看" : "占卜"}看到
+                  {note.subjectType === "center" ? "中间牌" : `玩家 ${note.subjectId}`}为
+                  {ROLE_META[note.role].name}
+                </li>
+              ))}
+            </ul>
+          </article>
+
+          <article className="panel">
+            <h2>行动日志</h2>
+            <ul className="text-list">
+              {publicState.logs.map((log) => (
+                <li key={log.id}>{log.message}</li>
+              ))}
+            </ul>
+          </article>
+
+          <article className="panel">
+            <h2>私密提示</h2>
+            <ul className="text-list">
+              {privateFeed.map((line, index) => (
+                <li key={`${line}-${index}`}>{line}</li>
+              ))}
+            </ul>
+          </article>
+        </aside>
       </section>
 
       <ErrorPanel errors={errors} />
@@ -558,10 +845,11 @@ export function App() {
 function RoleAvatar(props: { role: Role; label: string; size: "sm" | "xl" }) {
   const [failed, setFailed] = useState(false);
   const meta = ROLE_META[props.role];
+  const iconPath = props.size === "sm" ? meta.iconSmall : meta.icon;
   return (
     <div className={`role-avatar ${props.size === "xl" ? "xl" : "sm"}`}>
       {!failed ? (
-        <img src={meta.icon} alt={meta.name} onError={() => setFailed(true)} />
+        <img src={iconPath} alt={meta.name} onError={() => setFailed(true)} />
       ) : (
         <span>{props.label}</span>
       )}

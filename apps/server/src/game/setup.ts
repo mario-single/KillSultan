@@ -66,15 +66,15 @@ function deckProfileByPlayers(playerCount: number): {
   const map: Record<number, { sultan: number; guard: number; assassin: number; slave: number; neutral: number }> = {
     5: { sultan: 1, guard: 1, assassin: 1, slave: 3, neutral: 0 },
     6: { sultan: 1, guard: 1, assassin: 1, slave: 3, neutral: 1 },
-    7: { sultan: 1, guard: 2, assassin: 2, slave: 3, neutral: 0 },
+    7: { sultan: 1, guard: 1, assassin: 1, slave: 3, neutral: 2 },
     8: { sultan: 1, guard: 2, assassin: 2, slave: 3, neutral: 1 },
     9: { sultan: 1, guard: 2, assassin: 2, slave: 3, neutral: 2 },
     10: { sultan: 1, guard: 2, assassin: 2, slave: 3, neutral: 3 },
-    11: { sultan: 1, guard: 3, assassin: 3, slave: 4, neutral: 1 },
+    11: { sultan: 1, guard: 2, assassin: 2, slave: 4, neutral: 3 },
     12: { sultan: 1, guard: 3, assassin: 3, slave: 4, neutral: 2 },
     13: { sultan: 1, guard: 3, assassin: 3, slave: 4, neutral: 3 },
     14: { sultan: 1, guard: 3, assassin: 3, slave: 4, neutral: 4 },
-    15: { sultan: 1, guard: 3, assassin: 3, slave: 4, neutral: 5 },
+    15: { sultan: 1, guard: 3, assassin: 3, slave: 5, neutral: 4 },
   };
   const found = map[playerCount];
   if (!found) {

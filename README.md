@@ -1,6 +1,76 @@
 # 刺杀苏丹王 KillSultan（MVP）
 
-这是一个基于网页的多人实时身份推理游戏项目，核心玩法参考《刺杀苏丹王 / 推翻苏丹》。
+基于网页的多人实时身份推理游戏，核心玩法参考《刺杀苏丹王》。
+
+## 我现在就想开一局
+
+1. 安装 Node.js（建议 20+，最低 18+）。
+2. 在项目根目录执行：
+
+```bash
+npm install
+npm run dev
+```
+
+3. 打开浏览器：`http://localhost:5173`
+4. 服务端健康检查：`http://localhost:3000/health`（看到 `{"ok":true,...}` 即正常）
+
+如果你只想看更详细的新手步骤，请直接看 [docs/quickstart-zh.md](docs/quickstart-zh.md)。
+
+## 第一局怎么开始
+
+1. 房主打开 `http://localhost:5173`，输入昵称，点击“创建房间”。
+2. 其他玩家输入昵称 + 房间号，点击“加入房间”。
+3. 全员点击“准备”。
+4. 房主点击“开始游戏”。
+
+## 单机多人测试入口
+
+如果你想在一个页面里模拟多玩家压力测试，打开：
+
+`http://localhost:5173/?lab=1`
+
+该实验台支持 5-15 名模拟玩家、全流程动作、断线重连与调试事件。
+
+## 常用命令
+
+- `npm run dev`：同时启动 shared 构建监听、服务端、客户端
+- `npm run dev:server`：仅启动服务端（默认 3000）
+- `npm run dev:client`：仅启动客户端（默认 5173）
+- `npm run dev:shared`：仅监听 shared 包构建
+- `npm run typecheck`：检查全部工作区类型
+- `npm run docs:sync`：同步文档到客户端 `public/docs`
+- `npm run docs:check`：检查文档是否已同步
+- `npm run rulebook:docx`：从 Markdown 生成 DOCX 规则手册
+
+## 可选配置（高级）
+
+默认情况下不需要改任何配置即可本地运行。
+
+- `PORT`：服务端端口，默认 `3000`
+- `CORS_ORIGIN`：允许的客户端地址，默认 `*`
+- `REDIS_URL`：配置后启用 Redis 存储；不配置则使用内存存储
+- `VITE_SERVER_URL`：客户端连接服务端地址，默认 `http://localhost:3000`
+
+仓库里有 `.env.example` 作为变量参考值。
+
+## 常见问题
+
+### 1. 页面打不开 / 连不上
+
+- 确认 `npm run dev` 进程仍在运行。
+- 打开 `http://localhost:3000/health` 看是否返回 `ok: true`。
+- 确认 `http://localhost:5173` 可以访问。
+
+### 2. 提示端口被占用（3000 或 5173）
+
+- 关闭之前已经启动的同类进程后重试。
+- 或改端口后再启动（例如先设置 `PORT` / `VITE_SERVER_URL`）。
+
+### 3. 加入房间失败
+
+- 房间号必须完全一致（建议全大写）。
+- 游戏开始后不支持新玩家中途加入，仅支持原玩家断线重连。
 
 ## 文档入口
 
@@ -8,87 +78,12 @@
 - 玩家规则手册（Markdown）：[docs/玩家规则手册.md](docs/玩家规则手册.md)
 - 玩家规则手册（DOCX）：[docs/玩家规则手册.docx](docs/玩家规则手册.docx)
 
-## 技术栈
-
-- 服务端：Node.js + TypeScript + Socket.io + Redis（可选）
-- 客户端：React + TypeScript + Socket.io Client + Vite
-- 协议共享：`packages/shared`
-
-## 快速启动
-
-1. 安装依赖
-
-```bash
-npm install
-```
-
-2. 启动开发环境
-
-```bash
-npm run dev
-```
-
-3. 打开页面
-
-```text
-http://localhost:5173
-```
-
-服务端默认地址：
-
-```text
-http://localhost:3000
-```
-
-### 单窗口对局测试实验台
-
-打开下面地址可进入“同窗口模拟 5-15 位玩家”的测试窗口：
-
-```text
-http://localhost:5173/?lab=1
-```
-
-测试窗口支持：
-
-- 一键创建 5-15 位模拟玩家并加入同房间
-- 全部准备 / 房主开局
-- 每个模拟玩家独立执行偷看、交换、换中间牌、公开
-- 每个模拟玩家可用可视化操作测试全流程（含高级调试区的自定义事件）
-- 单玩家断线、重连（Resync）、离开房间
-
-## 常用命令
-
-- `npm run dev`：启动全部开发进程
-- `npm run typecheck`：检查所有工作区类型
-- `npm run rulebook:docx`：从 Markdown 生成 DOCX 规则手册
-- `npm --workspace @sultan/server run build`：仅构建服务端
-- `npm --workspace @sultan/client run typecheck`：仅检查客户端类型
-
-## 已实现内容（当前口径）
-
-- 房间系统：创建 / 加入 / 离开 / 准备 / 开始
-- 回合动作：偷看 / 交换 / 换中间牌 / 公开
-- 角色技能：苏丹、刺客、守卫、奴隶、占卜师、肚皮舞娘、奴隶贩子、大官
-- 中立角色：4 张（占卜师、肚皮舞娘、奴隶贩子、大官）
-- 断线重连：基于 token 的 `state:resync`
-- 服务端权威判定：胜负和技能效果由服务端统一结算
-- 信息隔离：暗牌不会广播给无权限客户端
-- 规则弹窗：网站内可随时点击“查看规则”
-
-## Redis（可选）
-
-默认使用内存存储；如需 Redis 快照，配置：
-
-```bash
-REDIS_URL=redis://localhost:6379
-```
-
 ## 项目结构
 
 ```text
 apps/
   server/   # 服务端（权威状态机 + Socket.io）
-  client/   # 前端（React 页面）
+  client/   # 前端（React + Vite）
 packages/
   shared/   # 前后端共享类型、规则与协议
 docs/
