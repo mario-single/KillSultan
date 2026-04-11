@@ -171,6 +171,12 @@ button:disabled {
   border-color: rgba(47, 122, 97, 0.52);
 }
 
+.link-btn {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
 .row {
   display: flex;
   gap: 8px;
@@ -409,14 +415,40 @@ button:disabled {
   margin: 0;
 }
 
-.rulebook-content {
+.rulebook-body {
   margin: 0;
   padding: 14px;
-  white-space: pre-wrap;
   overflow: auto;
-  line-height: 1.7;
-  color: var(--ink);
-  font-family: "Noto Sans SC", "Microsoft YaHei UI", sans-serif;
+}
+
+.rulebook-body h4 {
+  margin: 6px 0 10px;
+}
+
+.rule-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.rule-card {
+  border: 1px solid rgba(53, 43, 28, 0.18);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.74);
+  padding: 10px;
+}
+
+.rule-card strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.rule-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
 }
 
 @media (max-width: 720px) {

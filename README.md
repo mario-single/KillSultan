@@ -1,4 +1,4 @@
-# 杀死苏丹 Online（MVP 骨架）
+# 杀死苏丹 Online（MVP）
 
 这是一个基于网页的多人实时身份推理游戏项目，核心玩法参考《杀死苏丹 / 推翻苏丹》。
 
@@ -7,13 +7,13 @@
 - 新手开局指南（简体中文）：[docs/quickstart-zh.md](docs/quickstart-zh.md)
 - 玩家规则手册（Markdown）：[docs/玩家规则手册.md](docs/玩家规则手册.md)
 - 玩家规则手册（DOCX）：[docs/玩家规则手册.docx](docs/玩家规则手册.docx)
-- 角色图标命名规范（简体中文）：[apps/client/public/assets/roles/命名规范.txt](apps/client/public/assets/roles/命名规范.txt)
+- 角色图标命名规范：[apps/client/public/assets/roles/命名规范.txt](apps/client/public/assets/roles/命名规范.txt)
 
 ## 技术栈
 
 - 服务端：Node.js + TypeScript + Socket.io + Redis（可选）
 - 客户端：React + TypeScript + Socket.io Client + Vite
-- 协议共享：`packages/shared`（前后端共用类型与规则）
+- 协议共享：`packages/shared`
 
 ## 快速启动
 
@@ -23,7 +23,7 @@
 npm install
 ```
 
-2. 启动开发环境（共享包监听 + 服务端 + 客户端）
+2. 启动开发环境
 
 ```bash
 npm run dev
@@ -35,7 +35,7 @@ npm run dev
 http://localhost:5173
 ```
 
-服务端地址
+服务端默认地址：
 
 ```text
 http://localhost:3000
@@ -49,20 +49,20 @@ http://localhost:3000
 - `npm --workspace @sultan/server run build`：仅构建服务端
 - `npm --workspace @sultan/client run typecheck`：仅检查客户端类型
 
-## 当前已实现功能（MVP）
+## 已实现内容（当前口径）
 
 - 房间系统：创建 / 加入 / 离开 / 准备 / 开始
+- 回合动作：偷看 / 交换 / 换中间牌 / 公开
+- 角色技能：苏丹、刺客、守卫、奴隶、占卜师、肚皮舞娘、奴隶贩子、大官
+- 中立角色：4 张（占卜师、肚皮舞娘、奴隶贩子、大官）
 - 断线重连：基于 token 的 `state:resync`
-- 服务端权威判定：回合行动与胜利条件在服务端统一处理
-- 核心行动：偷看、交换、换中间牌、公开身份
-- 角色技能：苏丹、刺客、守卫、奴隶、占卜师、肚皮舞娘（含扩展开关）
+- 服务端权威判定：胜负和技能效果由服务端统一结算
 - 信息隔离：暗牌不会广播给无权限客户端
-- 日志系统：广播动作过程，私密结果通过单播通知
-- 规则查看：网站内可点击“查看规则”弹窗随时查看完整手册
+- 规则弹窗：网站内可随时点击“查看规则”
 
 ## Redis（可选）
 
-默认使用内存存储；若需要 Redis 快照，配置环境变量：
+默认使用内存存储；如需 Redis 快照，配置：
 
 ```bash
 REDIS_URL=redis://localhost:6379
@@ -78,4 +78,6 @@ packages/
   shared/   # 前后端共享类型、规则与协议
 docs/
   quickstart-zh.md
+  玩家规则手册.md
+  玩家规则手册.docx
 ```

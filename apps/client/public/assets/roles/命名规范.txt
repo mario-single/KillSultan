@@ -6,6 +6,8 @@
 4. slave.png
 5. oracle.png
 6. belly_dancer.png
+7. slave_trader.png
+8. grand_official.png
 
 可选补充图片（非必需）：
 

@@ -63,18 +63,14 @@ async function syncRoom(roomId: string): Promise<void> {
       }
     });
   } catch {
-    // 房间可能已经被销毁，此处忽略即可。
+    // 房间可能已销毁，此处忽略。
   }
 }
 
 io.on("connection", (socket) => {
   socket.on("room:create", async (payload, ack) => {
     try {
-      const created: RoomCreatedData = await engine.createRoom(
-        payload.playerName,
-        socket.id,
-        payload.token,
-      );
+      const created: RoomCreatedData = await engine.createRoom(payload.playerName, socket.id, payload.token);
       socket.join(created.roomId);
       ack(ok(created));
       await syncRoom(created.roomId);
