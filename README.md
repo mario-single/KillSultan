@@ -1,13 +1,12 @@
-# 杀死苏丹 Online（MVP）
+# 刺杀苏丹王 KillSultan（MVP）
 
-这是一个基于网页的多人实时身份推理游戏项目，核心玩法参考《杀死苏丹 / 推翻苏丹》。
+这是一个基于网页的多人实时身份推理游戏项目，核心玩法参考《刺杀苏丹王 / 推翻苏丹》。
 
 ## 文档入口
 
 - 新手开局指南（简体中文）：[docs/quickstart-zh.md](docs/quickstart-zh.md)
 - 玩家规则手册（Markdown）：[docs/玩家规则手册.md](docs/玩家规则手册.md)
 - 玩家规则手册（DOCX）：[docs/玩家规则手册.docx](docs/玩家规则手册.docx)
-- 角色图标命名规范：[apps/client/public/assets/roles/命名规范.txt](apps/client/public/assets/roles/命名规范.txt)
 
 ## 技术栈
 
@@ -40,6 +39,22 @@ http://localhost:5173
 ```text
 http://localhost:3000
 ```
+
+### 单窗口对局测试实验台
+
+打开下面地址可进入“同窗口模拟 5-15 位玩家”的测试窗口：
+
+```text
+http://localhost:5173/?lab=1
+```
+
+测试窗口支持：
+
+- 一键创建 5-15 位模拟玩家并加入同房间
+- 全部准备 / 房主开局
+- 每个模拟玩家独立执行偷看、交换、换中间牌、公开
+- 每个模拟玩家可用可视化操作测试全流程（含高级调试区的自定义事件）
+- 单玩家断线、重连（Resync）、离开房间
 
 ## 常用命令
 

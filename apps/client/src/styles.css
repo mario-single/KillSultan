@@ -253,12 +253,18 @@ button:disabled {
 
 .player-card.current {
   border-color: rgba(177, 69, 44, 0.6);
-  box-shadow: inset 0 0 0 1px rgba(177, 69, 44, 0.22);
+  box-shadow:
+    inset 0 0 0 1px rgba(177, 69, 44, 0.22),
+    0 2px 10px rgba(177, 69, 44, 0.16);
 }
 
 .player-card.selected {
-  border-color: rgba(47, 122, 97, 0.68);
-  box-shadow: inset 0 0 0 1px rgba(47, 122, 97, 0.26);
+  border-color: rgba(47, 122, 97, 0.88);
+  background: linear-gradient(140deg, rgba(240, 255, 249, 0.95), rgba(233, 249, 243, 0.92));
+  box-shadow:
+    inset 0 0 0 1px rgba(47, 122, 97, 0.3),
+    0 4px 14px rgba(47, 122, 97, 0.2);
+  transform: translateY(-1px);
 }
 
 .player-head {
@@ -271,6 +277,17 @@ button:disabled {
 .player-head span {
   color: var(--muted);
   font-size: 0.85rem;
+}
+
+.selected-tag {
+  margin-top: 6px;
+  display: inline-flex;
+  font-size: 0.76rem;
+  color: #1f5d4a;
+  border: 1px solid rgba(47, 122, 97, 0.5);
+  border-radius: 999px;
+  background: rgba(47, 122, 97, 0.14);
+  padding: 2px 8px;
 }
 
 .player-role {
@@ -451,8 +468,211 @@ button:disabled {
   line-height: 1.5;
 }
 
+.lab-shell {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.lab-shell h1 {
+  margin: 0;
+  font-size: clamp(1.7rem, 3.6vw, 2.4rem);
+}
+
+.lab-subtitle {
+  margin: 10px 0 0;
+  color: var(--muted);
+}
+
+.lab-status {
+  margin: 8px 0 14px;
+  font-size: 0.92rem;
+}
+
+.lab-toolbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.lab-number {
+  width: 130px;
+}
+
+.lab-grid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 10px;
+}
+
+.lab-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  padding: 10px;
+}
+
+.lab-card.is-turn {
+  border-color: rgba(177, 69, 44, 0.68);
+  box-shadow:
+    var(--shadow),
+    inset 0 0 0 1px rgba(177, 69, 44, 0.26);
+}
+
+.lab-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.lab-card-head h3 {
+  margin: 0;
+  font-size: 1.02rem;
+}
+
+.lab-meta {
+  margin-top: 4px;
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+
+.lab-section {
+  margin-top: 10px;
+  border-top: 1px dashed rgba(66, 50, 34, 0.2);
+  padding-top: 10px;
+}
+
+.lab-role-skill {
+  background: rgba(47, 122, 97, 0.08);
+  border-radius: 10px;
+  border: 1px dashed rgba(47, 122, 97, 0.35);
+  padding: 10px;
+}
+
+.lab-role-skill strong {
+  display: inline-flex;
+  margin-bottom: 6px;
+}
+
+.lab-role-skill p {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.lab-inline-note {
+  margin: 8px 0 0;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+
+.lab-btn {
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  background: var(--primary);
+  color: #fff;
+  transition: transform 0.14s ease, filter 0.18s ease, box-shadow 0.18s ease;
+}
+
+.lab-btn:hover {
+  filter: brightness(1.05);
+}
+
+.lab-btn:active {
+  transform: scale(0.97);
+}
+
+.lab-btn.is-pulse {
+  box-shadow: 0 0 0 3px rgba(177, 69, 44, 0.26);
+}
+
+.lab-btn-primary {
+  background: var(--primary-2);
+}
+
+.lab-btn-ghost {
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+.lab-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.lab-chip-row {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lab-chip {
+  border: 1px solid rgba(54, 41, 28, 0.2);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--ink);
+  padding: 5px 10px;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.lab-chip.selected {
+  border-color: rgba(47, 122, 97, 0.8);
+  background: rgba(232, 247, 240, 0.95);
+  color: #1f5d4a;
+  font-weight: 600;
+}
+
+.lab-badge {
+  display: inline-flex;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.76rem;
+  border: 1px solid transparent;
+}
+
+.lab-badge.ok {
+  color: #1f5d4a;
+  border-color: rgba(47, 122, 97, 0.42);
+  background: rgba(47, 122, 97, 0.12);
+}
+
+.lab-badge.warn {
+  color: #8f2d2b;
+  border-color: rgba(168, 53, 48, 0.48);
+  background: rgba(168, 53, 48, 0.12);
+}
+
+.lab-details {
+  margin-top: 10px;
+}
+
+.lab-logbox {
+  margin-top: 8px;
+  max-height: 160px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.75);
+  padding: 8px;
+  font-size: 0.85rem;
+}
+
 @media (max-width: 720px) {
   .shell {
     padding: 12px;
+  }
+
+  .lab-shell {
+    padding: 10px;
   }
 }

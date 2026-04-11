@@ -78,9 +78,15 @@ export interface GameSettings {
 
 export interface GameEffects {
   sultanCrownedRound?: number;
+  sultanCrownedSequence?: number;
   sultanPlayerId?: string;
+  crownedByPlayerId?: string;
   sultanKilledByAssassin?: boolean;
   assassinKillerPlayerId?: string;
+  extraTurnPlayerId?: string;
+  noSwapBackA?: string;
+  noSwapBackB?: string;
+  noSwapBackSequence?: number;
 }
 
 export interface WinResult {
@@ -135,7 +141,7 @@ export interface PublicGameView {
 
 export interface PrivateGameView {
   selfPlayerId: string;
-  selfRole: Role;
+  selfRole?: Role;
   selfCardFaceUp: boolean;
   centerCardKnownRole?: Role;
   privateKnowledge: KnowledgeItem[];

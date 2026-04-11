@@ -53,7 +53,7 @@ function buildPrivateState(state: GameState, playerId: string): PrivateGameView 
 
   return {
     selfPlayerId: player.id,
-    selfRole: player.card.role,
+    selfRole: state.phase === "lobby" ? undefined : player.card.role,
     selfCardFaceUp: player.card.faceUp,
     centerCardKnownRole: centerKnown?.role,
     privateKnowledge: filteredKnowledge,

@@ -28,7 +28,10 @@ const ROLE_META: Record<Role, { name: string; short: string; icon: string }> = {
 };
 
 const RULE_CARDS: Array<{ title: string; desc: string }> = [
-  { title: "苏丹（保皇派）", desc: "公开后加冕；存活整整一轮保皇派获胜。可处决一名已公开革命角色，不会被守卫拘留。" },
+  {
+    title: "苏丹（保皇派）",
+    desc: "公开身份后，若存活整整一轮保皇派获胜。可处决一名已公开革命角色，不会被守卫拘留。",
+  },
   {
     title: "刺客（革命党）",
     desc: "公开时刺杀一名玩家。若刺客或目标相邻位置存在有效守卫，则刺杀失败且刺客死亡。",
@@ -339,7 +342,7 @@ export function App() {
       <div className="shell">
         <div className="hero">
           <p className="hero-badge">多人实时策略 · 身份隐藏 · 阵营摇摆</p>
-          <h1>杀死苏丹 Online</h1>
+          <h1>刺杀苏丹王 KillSultan</h1>
           <p>输入昵称即可开房，邀请朋友输入房间号加入。</p>
         </div>
         <div className="card lobby-card">
@@ -439,6 +442,7 @@ export function App() {
                     <strong>{player.name}</strong>
                     <span>{player.id === myPlayerId ? "我" : `座位${player.seatIndex + 1}`}</span>
                   </div>
+                  {selected ? <div className="selected-tag">已选目标</div> : null}
                   <div className="player-role">
                     {revealedRole ? (
                       <>

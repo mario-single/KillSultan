@@ -6,3 +6,11 @@ dist
 .env.local
 coverage
 *.tsbuildinfo
+
+# local developer notes (do not upload)
+docs/开发TODO.md
+docs/AI交接记忆库.md
+docs/图片命名规范.txt
+apps/client/public/docs/开发TODO.md
+apps/client/public/docs/AI交接记忆库.md
+apps/client/public/docs/图片命名规范.txt

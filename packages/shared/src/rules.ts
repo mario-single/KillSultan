@@ -22,6 +22,9 @@ export function effectiveFaction(player: PlayerState): WinFaction | "neutral" {
   if (player.card.role === "belly_dancer") {
     return player.card.faceUp ? "rebels" : "loyalists";
   }
+  if (player.card.role === "slave_trader") {
+    return player.card.faceUp ? "loyalists" : "rebels";
+  }
   return roleBaseFaction(player.card.role);
 }
 
