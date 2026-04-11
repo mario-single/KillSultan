@@ -10,12 +10,28 @@ import {
 } from "@sultan/shared";
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? "http://localhost:3000";
-const TOKEN_KEY = "sultan_token";
-const ROOM_KEY = "sultan_room_id";
-const NAME_KEY = "sultan_name";
+const BASE_TOKEN_KEY = "sultan_token";
+const BASE_ROOM_KEY = "sultan_room_id";
+const BASE_NAME_KEY = "sultan_name";
 const BACK_ICON = "/assets/roles/back.png";
 const LOGO_ICON = "/assets/roles/logo.png";
 const LOGO_WIDE = "/assets/roles/logo2.png";
+
+const pageUrl = typeof window === "undefined" ? null : new URL(window.location.href);
+const simSlotRaw = pageUrl?.searchParams.get("simSlot") ?? "";
+const SIM_SLOT = simSlotRaw.trim().replace(/[^\w-]/g, "");
+const SIM_NAME = (pageUrl?.searchParams.get("simName") ?? "").trim();
+const SIM_ROOM = (pageUrl?.searchParams.get("simRoom") ?? "").trim().toUpperCase();
+const SIM_AUTO_MODE = (pageUrl?.searchParams.get("simAuto") ?? "").trim();
+const SIM_AUTO_READY = pageUrl?.searchParams.get("simAutoReady") === "1";
+const SIM_AUTO_START = pageUrl?.searchParams.get("simAutoStart") === "1";
+const SIM_COMPACT = pageUrl?.searchParams.get("simCompact") === "1";
+const SIM_EMBED = pageUrl?.searchParams.get("embed") === "1";
+
+const KEY_SUFFIX = SIM_SLOT ? `_${SIM_SLOT}` : "";
+const TOKEN_KEY = `${BASE_TOKEN_KEY}${KEY_SUFFIX}`;
+const ROOM_KEY = `${BASE_ROOM_KEY}${KEY_SUFFIX}`;
+const NAME_KEY = `${BASE_NAME_KEY}${KEY_SUFFIX}`;
 
 const NOTE_OPTIONS = ["", "疑似苏丹", "疑似刺客", "疑似守卫", "疑似奴隶", "重点观察"] as const;
 type NoteText = (typeof NOTE_OPTIONS)[number];
@@ -48,46 +64,60 @@ const ROLE_META: Record<Role, { name: string; short: string; icon: string; iconS
   },
 };
 
-const RULE_CARDS: Array<{ title: string; desc: string }> = [
+type RuleGlyphKind = "turn" | "faction" | "victory" | "privacy";
+
+const RULE_CARDS: Array<{ role: Role; title: string; desc: string }> = [
   {
+    role: "sultan",
     title: "苏丹（保皇派）",
     desc: "公开身份后，若存活整整一轮保皇派获胜。可处决一名已公开革命角色，不会被守卫拘留。",
   },
   {
+    role: "assassin",
     title: "刺客（革命党）",
     desc: "公开时刺杀一名玩家。若刺客或目标相邻位置存在有效守卫，则刺杀失败且刺客死亡。",
   },
   {
+    role: "guard",
     title: "守卫（保皇派）",
     desc: "公开时可拘留一名玩家。若目标不是苏丹或守卫，则目标跳过一次行动。刺客刺杀时可被动拦截。",
   },
   {
+    role: "slave",
     title: "奴隶（革命党）",
     desc: "公开后可发动起义，相邻奴隶可跟随公开。若形成三张相邻公开奴隶，革命党立即获胜。",
   },
   {
+    role: "oracle",
     title: "占卜师（中立）",
     desc: "公开后秘密查看三张牌并选择预言阵营。若该阵营最终获胜，占卜师获胜。",
   },
   {
+    role: "belly_dancer",
     title: "肚皮舞娘（中立）",
     desc: "暗置时保皇倾向；公开时革命倾向。公开状态可魅惑相邻守卫，使其失效。",
   },
   {
+    role: "slave_trader",
     title: "奴隶贩子（中立）",
     desc: "选择一名玩家，若其为奴隶则拘留并重复技能；若不是奴隶则无事发生，链式效果终止。",
   },
   {
+    role: "grand_official",
     title: "大官（中立）",
     desc: "选择一名玩家并强制其执行技能。结算时若你相邻玩家分数和 >= 2，则你额外获胜。",
   },
 ];
 
-const RULE_BASE: Array<{ title: string; desc: string }> = [
-  { title: "每回合动作", desc: "每位玩家每回合只能执行 1 个动作：偷看 / 交换 / 换中间牌 / 公开。" },
-  { title: "阵营摇摆", desc: "阵营由当前持牌决定，暗牌交换后阵营立即变化。" },
-  { title: "胜利条件", desc: "革命党：刺客杀苏丹或三奴隶相邻公开；保皇派：苏丹公开存活整轮；中立按角色条件结算。" },
-  { title: "隐私规则", desc: "暗牌不会广播。偷看、占卜等结果仅推送给拥有权限的玩家。" },
+const RULE_BASE: Array<{ title: string; desc: string; icon: RuleGlyphKind }> = [
+  { title: "每回合动作", desc: "每位玩家每回合只能执行 1 个动作：偷看 / 交换 / 换中间牌 / 公开。", icon: "turn" },
+  { title: "阵营摇摆", desc: "阵营由当前持牌决定，暗牌交换后阵营立即变化。", icon: "faction" },
+  {
+    title: "胜利条件",
+    desc: "革命党：刺客杀苏丹或三奴隶相邻公开；保皇派：苏丹公开存活整轮；中立按角色条件结算。",
+    icon: "victory",
+  },
+  { title: "隐私规则", desc: "暗牌不会广播。偷看、占卜等结果仅推送给拥有权限的玩家。", icon: "privacy" },
 ];
 
 function unwrapAck<T>(result: AckResult<T>): T {
@@ -189,6 +219,11 @@ export function App() {
   const [slaveTraderTargetsInput, setSlaveTraderTargetsInput] = useState("");
   const [forceSlaveTraderTargetsInput, setForceSlaveTraderTargetsInput] = useState("");
   const [showRuleModal, setShowRuleModal] = useState(false);
+  const autoCreateDoneRef = useRef(false);
+  const autoJoinCooldownUntilRef = useRef(0);
+  const autoJoinInFlightRef = useRef(false);
+  const autoReadyCooldownUntilRef = useRef(0);
+  const autoStartCooldownUntilRef = useRef(0);
 
   useEffect(() => {
     const socket: ClientSocket = io(SERVER_URL, { transports: ["websocket"] });
@@ -246,6 +281,92 @@ export function App() {
   const me = publicState?.players.find((player) => player.id === myPlayerId);
   const currentActor = playersOrdered.find((player) => player.id === currentPlayerId);
   const myRole = privateState?.selfRole;
+
+  useEffect(() => {
+    if (!SIM_AUTO_MODE || publicState) {
+      return;
+    }
+    const socket = socketRef.current;
+    if (!socket || !socket.connected) {
+      return;
+    }
+
+    const desiredName = SIM_NAME || (SIM_SLOT ? `模拟玩家-${SIM_SLOT}` : "模拟玩家");
+    if (!playerName.trim()) {
+      setPlayerName(desiredName);
+      localStorage.setItem(NAME_KEY, desiredName);
+    }
+
+    if (SIM_AUTO_MODE === "create") {
+      if (autoCreateDoneRef.current) {
+        return;
+      }
+      autoCreateDoneRef.current = true;
+      socket.emit("room:create", { playerName: desiredName, token: token || undefined }, (result) => {
+        if (!result.ok) {
+          setErrors((prev) => [`${result.error.code}: ${result.error.message}`, ...prev].slice(0, 20));
+          autoCreateDoneRef.current = false;
+          return;
+        }
+        setToken(result.data.token);
+        setMyPlayerId(result.data.playerId);
+        setRoomIdInput(result.data.roomId);
+        localStorage.setItem(TOKEN_KEY, result.data.token);
+        localStorage.setItem(ROOM_KEY, result.data.roomId);
+        localStorage.setItem(NAME_KEY, desiredName);
+      });
+      return;
+    }
+
+    if (SIM_AUTO_MODE === "join") {
+      if (!SIM_ROOM || autoJoinInFlightRef.current || Date.now() < autoJoinCooldownUntilRef.current) {
+        return;
+      }
+      autoJoinInFlightRef.current = true;
+      socket.emit(
+        "room:join",
+        {
+          roomId: SIM_ROOM,
+          playerName: desiredName,
+          token: token || undefined,
+        },
+        (result) => {
+          autoJoinInFlightRef.current = false;
+          if (!result.ok) {
+            autoJoinCooldownUntilRef.current = Date.now() + 1200;
+            return;
+          }
+          setToken(result.data.token);
+          setMyPlayerId(result.data.playerId);
+          setRoomIdInput(result.data.roomId);
+          localStorage.setItem(TOKEN_KEY, result.data.token);
+          localStorage.setItem(ROOM_KEY, result.data.roomId);
+          localStorage.setItem(NAME_KEY, desiredName);
+        },
+      );
+    }
+  }, [playerName, publicState, token]);
+
+  useEffect(() => {
+    if (!publicState || !me || !socketRef.current || publicState.phase !== "lobby") {
+      return;
+    }
+
+    const socket = socketRef.current;
+
+    if (SIM_AUTO_READY && !me.ready && Date.now() >= autoReadyCooldownUntilRef.current) {
+      autoReadyCooldownUntilRef.current = Date.now() + 600;
+      socket.emit("room:ready", { roomId: publicState.roomId, ready: true }, () => undefined);
+    }
+
+    if (SIM_AUTO_START && publicState.hostPlayerId === myPlayerId && Date.now() >= autoStartCooldownUntilRef.current) {
+      const canStart = publicState.players.length >= 5 && publicState.players.every((player) => player.ready);
+      if (canStart) {
+        autoStartCooldownUntilRef.current = Date.now() + 1200;
+        socket.emit("game:start", { roomId: publicState.roomId }, () => undefined);
+      }
+    }
+  }, [me, myPlayerId, publicState]);
 
   const noteStorageKey = publicState && myPlayerId ? `killsultan_notes_${publicState.roomId}_${myPlayerId}` : "";
 
@@ -527,8 +648,9 @@ export function App() {
   }
 
   if (!publicState) {
+    const shellClassName = `shell${SIM_COMPACT ? " shell-compact" : ""}${SIM_EMBED ? " shell-embed" : ""}`;
     return (
-      <div className="shell">
+      <div className={shellClassName}>
         <div className="hero">
           <img className="hero-logo" src={LOGO_ICON} alt="刺杀苏丹王 Logo" />
           <p className="hero-badge">多人实时策略 · 身份隐藏 · 阵营摇摆</p>
@@ -586,9 +708,10 @@ export function App() {
         player.revealedRole === "slave" &&
         areAdjacentSeats(player.seatIndex, me.seatIndex, playersOrdered.length),
     );
+  const shellClassName = `shell${SIM_COMPACT ? " shell-compact" : ""}${SIM_EMBED ? " shell-embed" : ""}`;
 
   return (
-    <div className="shell">
+    <div className={shellClassName}>
       <header className="topbar">
         <div className="game-head">
           <img className="game-logo-wide" src={LOGO_WIDE} alt="刺杀苏丹王" />
@@ -614,6 +737,15 @@ export function App() {
             <h2>圆桌显示区</h2>
             <p>点击头像可选目标并备注，当前行动玩家高亮</p>
           </div>
+          {publicState.phase === "lobby" ? (
+            <div className="ready-overview">
+              {playersOrdered.map((player) => (
+                <span key={`ready-${player.id}`} className={`ready-pill ${player.ready ? "is-ready" : "is-pending"}`}>
+                  #{player.seatIndex + 1} {player.name} · {player.ready ? "已准备" : "未准备"}
+                </span>
+              ))}
+            </div>
+          ) : null}
           <div className="round-table">
             <div className="table-center">
               <p>第 {publicState.turn.round} 轮</p>
@@ -650,6 +782,11 @@ export function App() {
                   {current ? <span className="seat-current-tag">行动中</span> : null}
                   {selected && !isSelf ? <span className="seat-target-tag">目标</span> : null}
                   {note ? <span className="seat-note-tag">{note}</span> : null}
+                  {publicState.phase === "lobby" ? (
+                    <span className={player.ready ? "seat-ready-tag" : "seat-unready-tag"}>
+                      {player.ready ? "已准备" : "未准备"}
+                    </span>
+                  ) : null}
                   {noteEditorFor === player.id ? (
                     <div className="seat-note-pop">
                       {NOTE_OPTIONS.map((option) => (
@@ -736,6 +873,18 @@ export function App() {
           <article className="panel skill-panel">
             <h2>身份技能</h2>
             <p className="skill-title">{revealLabel}</p>
+            {myRole ? (
+              <div className="skill-hero">
+                <img className="skill-hero-art" src={ROLE_META[myRole].icon} alt={`${ROLE_META[myRole].name}角色图`} />
+                <div className="skill-hero-meta">
+                  <span className="skill-hero-role">{ROLE_META[myRole].name}</span>
+                  <span className="skill-hero-tip">{roleFactionName(myRole, Boolean(privateState?.selfCardFaceUp))}</span>
+                </div>
+                <div className="skill-hero-glyph">
+                  <RoleGlyph role={myRole} size={36} />
+                </div>
+              </div>
+            ) : null}
             {myRole === "oracle" ? (
               <>
                 <label>预测阵营</label>
@@ -842,6 +991,138 @@ export function App() {
   );
 }
 
+function RoleGlyph(props: { role: Role; size?: number }) {
+  const size = props.size ?? 24;
+  const common = {
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.8,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+  };
+
+  switch (props.role) {
+    case "sultan":
+      return (
+        <svg className="role-glyph role-glyph-sultan" width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+          <path {...common} d="M4 17h16l-1.7-8-3.3 3.2-3-5-3 5L5.7 9z" />
+          <path {...common} d="M6 20h12" />
+        </svg>
+      );
+    case "assassin":
+      return (
+        <svg className="role-glyph role-glyph-assassin" width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+          <path {...common} d="M5 19l4.8-4.8" />
+          <path {...common} d="M9.8 14.2 19.5 4.5 21 6l-9.7 9.7" />
+          <path {...common} d="M13.2 7.8 16.2 10.8" />
+        </svg>
+      );
+    case "guard":
+      return (
+        <svg className="role-glyph role-glyph-guard" width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+          <path {...common} d="M12 3l7 3v5c0 5-3.3 8-7 10-3.7-2-7-5-7-10V6z" />
+        </svg>
+      );
+    case "slave":
+      return (
+        <svg className="role-glyph role-glyph-slave" width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+          <path {...common} d="M8.2 8.2a3 3 0 0 1 4.2 0l1.4 1.4a3 3 0 0 1 0 4.2" />
+          <path {...common} d="M15.8 15.8a3 3 0 0 1-4.2 0l-1.4-1.4a3 3 0 0 1 0-4.2" />
+        </svg>
+      );
+    case "oracle":
+      return (
+        <svg className="role-glyph role-glyph-oracle" width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+          <path {...common} d="M2.5 12s3.5-5.5 9.5-5.5 9.5 5.5 9.5 5.5-3.5 5.5-9.5 5.5S2.5 12 2.5 12z" />
+          <circle {...common} cx="12" cy="12" r="2.4" />
+        </svg>
+      );
+    case "belly_dancer":
+      return (
+        <svg
+          className="role-glyph role-glyph-belly-dancer"
+          width={size}
+          height={size}
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path {...common} d="M5 13c2.2-4.2 6.3-6 9-4.4 2.9 1.7 2.8 5.5-.1 7.3-2.6 1.6-5.9.8-7.7-1.1" />
+          <circle {...common} cx="16.5" cy="6.5" r="1.6" />
+        </svg>
+      );
+    case "slave_trader":
+      return (
+        <svg className="role-glyph role-glyph-slave-trader" width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+          <path {...common} d="M12 4v13" />
+          <path {...common} d="M6 7h12" />
+          <path {...common} d="M8 7 5.5 11h5z" />
+          <path {...common} d="M16 7 13.5 11h5z" />
+          <path {...common} d="M8 18h8" />
+        </svg>
+      );
+    case "grand_official":
+      return (
+        <svg className="role-glyph role-glyph-grand-official" width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+          <rect {...common} x="5" y="6" width="10" height="7" rx="1.5" />
+          <path {...common} d="M15 9h4" />
+          <path {...common} d="M9 13v5" />
+          <path {...common} d="M7 20h10" />
+        </svg>
+      );
+    default:
+      return null;
+  }
+}
+
+function RuleGlyph(props: { kind: RuleGlyphKind; size?: number }) {
+  const size = props.size ?? 20;
+  const common = {
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.8,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+  };
+
+  switch (props.kind) {
+    case "turn":
+      return (
+        <svg className="rule-glyph" width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+          <path {...common} d="M12 4a8 8 0 1 0 7.5 10" />
+          <path {...common} d="M12 4h4v4" />
+        </svg>
+      );
+    case "faction":
+      return (
+        <svg className="rule-glyph" width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+          <path {...common} d="M4 8h8l-2-2" />
+          <path {...common} d="M20 16h-8l2 2" />
+          <path {...common} d="M12 6v12" />
+        </svg>
+      );
+    case "victory":
+      return (
+        <svg className="rule-glyph" width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+          <path {...common} d="M8 4h8v3a4 4 0 0 1-8 0z" />
+          <path {...common} d="M8 6H5a2 2 0 0 0 2 3h1" />
+          <path {...common} d="M16 6h3a2 2 0 0 1-2 3h-1" />
+          <path {...common} d="M12 11v4" />
+          <path {...common} d="M8 19h8" />
+        </svg>
+      );
+    case "privacy":
+      return (
+        <svg className="rule-glyph" width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+          <rect {...common} x="6" y="10" width="12" height="9" rx="2" />
+          <path {...common} d="M9 10V8a3 3 0 0 1 6 0v2" />
+          <circle {...common} cx="12" cy="14.5" r="1.2" />
+        </svg>
+      );
+    default:
+      return null;
+  }
+}
+
 function RoleAvatar(props: { role: Role; label: string; size: "sm" | "xl" }) {
   const [failed, setFailed] = useState(false);
   const meta = ROLE_META[props.role];
@@ -896,7 +1177,10 @@ function RuleModal(props: { open: boolean; onClose: () => void }) {
           <div className="rule-grid">
             {RULE_BASE.map((item) => (
               <article key={item.title} className="rule-card">
-                <strong>{item.title}</strong>
+                <div className="rule-card-head">
+                  <RuleGlyph kind={item.icon} size={18} />
+                  <strong>{item.title}</strong>
+                </div>
                 <p>{item.desc}</p>
               </article>
             ))}
@@ -904,8 +1188,16 @@ function RuleModal(props: { open: boolean; onClose: () => void }) {
           <h4>角色技能（共 8 角色，其中中立 4 张）</h4>
           <div className="rule-grid">
             {RULE_CARDS.map((item) => (
-              <article key={item.title} className="rule-card">
-                <strong>{item.title}</strong>
+              <article key={item.title} className="rule-card rule-card-role">
+                <div className="rule-card-head">
+                  <img
+                    className="rule-role-image"
+                    src={ROLE_META[item.role].iconSmall}
+                    alt={`${ROLE_META[item.role].name}小图标`}
+                  />
+                  <RoleGlyph role={item.role} size={18} />
+                  <strong>{item.title}</strong>
+                </div>
                 <p>{item.desc}</p>
               </article>
             ))}

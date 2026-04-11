@@ -35,6 +35,45 @@ body {
   padding: 20px;
 }
 
+.shell-embed {
+  max-width: none;
+}
+
+.shell-compact {
+  max-width: none;
+  padding: 12px;
+}
+
+.shell-compact .hero {
+  margin: 8px auto 10px;
+  padding: 14px;
+}
+
+.shell-compact .play-layout {
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.shell-compact .table-panel {
+  min-height: auto;
+}
+
+.shell-compact .round-table {
+  width: min(94vw, 560px);
+}
+
+.shell-compact .ops-sidebar {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.shell-compact .panel {
+  padding: 12px;
+}
+
+.shell-compact .text-list {
+  max-height: 140px;
+}
+
 .hero {
   text-align: center;
   margin: 40px auto 22px;
@@ -619,13 +658,43 @@ button:disabled {
   padding: 10px;
 }
 
+.rule-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rule-glyph {
+  color: var(--primary-2);
+  flex: 0 0 auto;
+}
+
+.rule-card-role {
+  background:
+    radial-gradient(circle at 85% 14%, rgba(177, 69, 44, 0.12), transparent 38%),
+    rgba(255, 255, 255, 0.78);
+}
+
+.rule-role-image {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1px solid rgba(53, 43, 28, 0.2);
+  flex: 0 0 auto;
+}
+
 .rule-card strong {
   display: block;
   margin-bottom: 6px;
 }
 
-.rule-card p {
+.rule-card-head strong {
   margin: 0;
+}
+
+.rule-card p {
+  margin: 8px 0 0;
   color: var(--muted);
   font-size: 0.9rem;
   line-height: 1.5;
@@ -645,6 +714,34 @@ button:disabled {
   margin: 8px 0 0;
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.ready-overview {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ready-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  border: 1px solid transparent;
+}
+
+.ready-pill.is-ready {
+  color: #1f5d4a;
+  border-color: rgba(47, 122, 97, 0.5);
+  background: rgba(47, 122, 97, 0.14);
+}
+
+.ready-pill.is-pending {
+  color: #8f2d2b;
+  border-color: rgba(168, 53, 48, 0.5);
+  background: rgba(168, 53, 48, 0.14);
 }
 
 .round-table {
@@ -742,7 +839,9 @@ button:disabled {
 
 .seat-current-tag,
 .seat-target-tag,
-.seat-note-tag {
+.seat-note-tag,
+.seat-ready-tag,
+.seat-unready-tag {
   margin-top: 4px;
   padding: 2px 8px;
   border-radius: 999px;
@@ -766,6 +865,18 @@ button:disabled {
   color: #6b5a49;
   border-color: rgba(91, 70, 46, 0.35);
   background: rgba(255, 250, 240, 0.92);
+}
+
+.seat-ready-tag {
+  color: #1f5d4a;
+  border-color: rgba(47, 122, 97, 0.5);
+  background: rgba(47, 122, 97, 0.16);
+}
+
+.seat-unready-tag {
+  color: #8f2d2b;
+  border-color: rgba(168, 53, 48, 0.5);
+  background: rgba(168, 53, 48, 0.15);
 }
 
 .seat-note-pop {
@@ -805,6 +916,90 @@ button:disabled {
   margin: 8px 0 0;
   color: var(--primary);
   font-weight: 700;
+}
+
+.skill-hero {
+  margin-top: 10px;
+  border: 1px solid rgba(61, 47, 32, 0.16);
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at 82% 16%, rgba(177, 69, 44, 0.18), transparent 42%),
+    radial-gradient(circle at 12% 88%, rgba(47, 122, 97, 0.14), transparent 45%),
+    rgba(255, 252, 244, 0.9);
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 42px;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+}
+
+.skill-hero-art {
+  width: 64px;
+  height: 64px;
+  border-radius: 10px;
+  object-fit: cover;
+  border: 1px solid rgba(61, 47, 32, 0.24);
+}
+
+.skill-hero-meta {
+  display: grid;
+  gap: 2px;
+}
+
+.skill-hero-role {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.skill-hero-tip {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.skill-hero-glyph {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  border: 1px solid rgba(61, 47, 32, 0.2);
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.role-glyph {
+  display: block;
+}
+
+.role-glyph-sultan {
+  color: #b1452c;
+}
+
+.role-glyph-assassin {
+  color: #8f2d2b;
+}
+
+.role-glyph-guard {
+  color: #2f7a61;
+}
+
+.role-glyph-slave {
+  color: #805d2a;
+}
+
+.role-glyph-oracle {
+  color: #2f7a61;
+}
+
+.role-glyph-belly-dancer {
+  color: #b1452c;
+}
+
+.role-glyph-slave-trader {
+  color: #7c5c36;
+}
+
+.role-glyph-grand-official {
+  color: #2f7a61;
 }
 
 .current-tag {
@@ -854,8 +1049,76 @@ button:disabled {
   margin-bottom: 10px;
 }
 
+.lab-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+
+.lab-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+}
+
 .lab-number {
   width: 130px;
+  margin: 0;
+}
+
+.lab-shell-immersive {
+  max-width: 100%;
+}
+
+.sim-grid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: 12px;
+}
+
+.sim-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.sim-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(61, 47, 32, 0.16);
+  background: rgba(255, 255, 255, 0.64);
+}
+
+.sim-card-head strong {
+  font-size: 0.9rem;
+}
+
+.sim-card-head span {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.sim-frame {
+  width: 100%;
+  height: 840px;
+  border: 0;
+  background: rgba(245, 239, 226, 0.9);
+}
+
+.sim-wait {
+  min-height: 220px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 .lab-grid {
@@ -1173,6 +1436,28 @@ button:disabled {
 
   .seat-note-pop {
     width: 132px;
+  }
+
+  .skill-hero {
+    grid-template-columns: 56px minmax(0, 1fr) 38px;
+    gap: 8px;
+  }
+
+  .skill-hero-art {
+    width: 56px;
+    height: 56px;
+  }
+
+  .shell-compact .ops-sidebar {
+    grid-template-columns: 1fr;
+  }
+
+  .sim-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sim-frame {
+    height: 760px;
   }
 
   .lab-shell {
