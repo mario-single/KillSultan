@@ -19,12 +19,16 @@ const mappings = [
     targets: ["apps/client/public/docs/图片命名规范.txt", "apps/client/public/assets/roles/命名规范.txt"],
   },
   {
-    source: "docs/开发TODO.md",
-    targets: ["apps/client/public/docs/开发TODO.md"],
+    source: "docs/lxhtodo.md",
+    targets: ["apps/client/public/docs/lxhtodo.md"],
   },
   {
     source: "docs/AI交接记忆库.md",
     targets: ["apps/client/public/docs/AI交接记忆库.md"],
+  },
+  {
+    source: "docs/面向开发者文档.md",
+    targets: ["apps/client/public/docs/面向开发者文档.md"],
   },
 ];
 

@@ -85,7 +85,7 @@ body {
 }
 
 .hero-logo {
-  width: min(240px, 62vw);
+  width: 100%;
   height: auto;
   display: block;
   margin: 0 auto 10px;
@@ -132,7 +132,7 @@ body {
 }
 
 .game-logo-wide {
-  width: min(320px, 62vw);
+  width: 100%;
   height: auto;
   display: block;
 }
@@ -147,6 +147,22 @@ body {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.privacy-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.privacy-toggle.is-on {
+  color: #8f2d2b;
+  border-color: rgba(168, 53, 48, 0.52);
+  background: rgba(168, 53, 48, 0.12);
+}
+
+.eye-icon {
+  display: block;
 }
 
 .grid {
@@ -417,6 +433,20 @@ button:disabled {
   border-top: 1px dashed rgba(66, 50, 34, 0.2);
   padding: 8px 0;
   font-size: 0.93rem;
+}
+
+.text-list-compact {
+  max-height: 160px;
+}
+
+.privacy-mask-note {
+  margin: 10px 0 0;
+  border: 1px dashed rgba(168, 53, 48, 0.42);
+  border-radius: 10px;
+  background: rgba(255, 243, 241, 0.8);
+  color: #8f2d2b;
+  padding: 10px;
+  font-size: 0.9rem;
 }
 
 .role-avatar {
@@ -716,6 +746,56 @@ button:disabled {
   font-size: 0.9rem;
 }
 
+.pending-banner,
+.action-fx-banner {
+  margin-top: 10px;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 0.92rem;
+  border: 1px solid transparent;
+}
+
+.pending-banner {
+  border-color: rgba(181, 142, 45, 0.46);
+  background: rgba(255, 247, 222, 0.92);
+  color: #7b5f1d;
+}
+
+.action-fx-banner {
+  border-color: rgba(61, 47, 32, 0.18);
+  background: rgba(255, 252, 244, 0.96);
+  color: var(--ink);
+  animation: bannerSlide 1.4s ease;
+}
+
+.action-fx-banner.is-peek {
+  border-color: rgba(47, 122, 97, 0.34);
+  background: rgba(236, 249, 244, 0.96);
+}
+
+.action-fx-banner.is-swap,
+.action-fx-banner.is-swap_center {
+  border-color: rgba(177, 69, 44, 0.34);
+  background: rgba(255, 244, 239, 0.96);
+}
+
+.action-fx-banner.is-detain,
+.action-fx-banner.is-death {
+  border-color: rgba(168, 53, 48, 0.4);
+  background: rgba(255, 239, 237, 0.96);
+}
+
+.action-fx-banner.is-skill,
+.action-fx-banner.is-reveal {
+  border-color: rgba(181, 142, 45, 0.42);
+  background: rgba(255, 248, 231, 0.96);
+}
+
+.action-fx-banner.is-win {
+  border-color: rgba(47, 122, 97, 0.44);
+  background: rgba(235, 251, 243, 0.98);
+}
+
 .ready-overview {
   margin-top: 10px;
   display: flex;
@@ -758,6 +838,23 @@ button:disabled {
   margin-right: auto;
 }
 
+.round-table.fx-peek,
+.round-table.fx-reveal,
+.round-table.fx-skill {
+  animation: stageStartFlash 0.7s ease;
+}
+
+.round-table.fx-swap,
+.round-table.fx-swap-center,
+.round-table.fx-detain,
+.round-table.fx-death {
+  animation: stageHitFlash 0.55s ease;
+}
+
+.round-table.fx-win {
+  animation: stageWinFlash 1.6s ease;
+}
+
 .table-center {
   position: absolute;
   left: 50%;
@@ -785,6 +882,49 @@ button:disabled {
   width: 132px;
   display: grid;
   justify-items: center;
+}
+
+.seat-wrap.fx-peek-source .seat-btn,
+.seat-wrap.fx-skill-cast .seat-btn {
+  animation: currentPulse 0.8s ease;
+}
+
+.seat-wrap.fx-peek-target .seat-btn,
+.seat-wrap.fx-reveal .seat-btn,
+.seat-wrap.fx-skill-target .seat-btn,
+.seat-wrap.fx-win .seat-btn {
+  animation: revealFlash 0.7s ease;
+}
+
+.seat-wrap.fx-swap .seat-btn,
+.seat-wrap.fx-swap-center .seat-btn {
+  animation: hitShake 0.55s ease;
+}
+
+.seat-wrap.fx-detain .seat-btn {
+  animation: detainPulse 1s ease;
+}
+
+.seat-wrap.fx-death .seat-btn {
+  animation: deathDrop 1s ease forwards;
+}
+
+.seat-crown {
+  width: 34px;
+  height: 28px;
+  object-fit: contain;
+  margin-bottom: 2px;
+  filter: drop-shadow(0 2px 4px rgba(52, 38, 25, 0.24));
+}
+
+.seat-crown-fallback {
+  margin-bottom: 4px;
+  border: 1px solid rgba(181, 142, 45, 0.5);
+  border-radius: 999px;
+  background: rgba(255, 249, 226, 0.9);
+  color: #7b5f1d;
+  font-size: 0.7rem;
+  padding: 1px 8px;
 }
 
 .seat-btn {
@@ -910,6 +1050,31 @@ button:disabled {
   display: grid;
   gap: 12px;
   align-content: start;
+}
+
+.panel-private {
+  border-style: solid;
+  border-color: rgba(47, 122, 97, 0.34);
+  background:
+    radial-gradient(circle at 88% 12%, rgba(47, 122, 97, 0.12), transparent 38%),
+    rgba(247, 255, 251, 0.9);
+}
+
+.private-alert {
+  margin: 8px 0 0;
+  border: 1px solid rgba(47, 122, 97, 0.38);
+  border-radius: 10px;
+  background: rgba(228, 247, 240, 0.88);
+  color: #1f5d4a;
+  padding: 8px 10px;
+  font-weight: 700;
+}
+
+.private-section-title {
+  margin: 10px 0 2px;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 700;
 }
 
 .skill-panel .skill-title {
@@ -1432,6 +1597,11 @@ button:disabled {
   .seat-btn {
     width: 62px;
     height: 84px;
+  }
+
+  .seat-crown {
+    width: 30px;
+    height: 24px;
   }
 
   .seat-note-pop {

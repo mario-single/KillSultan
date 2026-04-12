@@ -203,6 +203,18 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("action:declineFollow", async (payload, ack) => {
+    try {
+      const result = await engine.handleDeclineSlaveUprisingFollow(payload.roomId, socket.id);
+      ack(ok(result.scopedState));
+      await syncRoom(payload.roomId);
+    } catch (err) {
+      const mapped = mapError(err);
+      ack(fail(mapped.code, mapped.message));
+      socket.emit("game:error", mapped);
+    }
+  });
+
   socket.on("disconnect", async () => {
     const out = await engine.disconnectSocket(socket.id);
     if (out.roomId) {

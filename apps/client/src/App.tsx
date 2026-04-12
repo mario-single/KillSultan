@@ -3,6 +3,7 @@ import { io, Socket } from "socket.io-client";
 import {
   AckResult,
   ClientToServerEvents,
+  LogEntry,
   PlayerScopedState,
   Role,
   ServerToClientEvents,
@@ -14,6 +15,7 @@ const BASE_TOKEN_KEY = "sultan_token";
 const BASE_ROOM_KEY = "sultan_room_id";
 const BASE_NAME_KEY = "sultan_name";
 const BACK_ICON = "/assets/roles/back.png";
+const HAT_ICON = "/assets/roles/hat.png";
 const LOGO_ICON = "/assets/roles/logo.png";
 const LOGO_WIDE = "/assets/roles/logo2.png";
 
@@ -37,6 +39,13 @@ const NOTE_OPTIONS = ["", "疑似苏丹", "疑似刺客", "疑似守卫", "疑�
 type NoteText = (typeof NOTE_OPTIONS)[number];
 
 type ClientSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
+type ActionFx = {
+  key: string;
+  type: LogEntry["type"];
+  actorId?: string;
+  targetId?: string;
+  message: string;
+};
 
 const ROLE_META: Record<Role, { name: string; short: string; icon: string; iconSmall: string }> = {
   sultan: { name: "苏丹", short: "苏", icon: "/assets/roles/sultan.png", iconSmall: "/assets/roles/s_sultan.png" },
@@ -70,7 +79,7 @@ const RULE_CARDS: Array<{ role: Role; title: string; desc: string }> = [
   {
     role: "sultan",
     title: "苏丹（保皇派）",
-    desc: "公开身份后，若存活整整一轮保皇派获胜。可处决一名已公开革命角色，不会被守卫拘留。",
+    desc: "公开身份后，若存活整整一轮保皇派获胜。自己的回合可处决一名已公开革命角色，也可不处决直接结束回合，不会被守卫拘留。",
   },
   {
     role: "assassin",
@@ -219,11 +228,18 @@ export function App() {
   const [slaveTraderTargetsInput, setSlaveTraderTargetsInput] = useState("");
   const [forceSlaveTraderTargetsInput, setForceSlaveTraderTargetsInput] = useState("");
   const [showRuleModal, setShowRuleModal] = useState(false);
+  const [privacyMaskOn, setPrivacyMaskOn] = useState(false);
+  const [socketConnected, setSocketConnected] = useState(false);
+  const [autoJoinRetryNonce, setAutoJoinRetryNonce] = useState(0);
+  const [actionFx, setActionFx] = useState<ActionFx | null>(null);
+  const [actionFxQueue, setActionFxQueue] = useState<ActionFx[]>([]);
   const autoCreateDoneRef = useRef(false);
+  const autoJoinDoneRef = useRef(false);
   const autoJoinCooldownUntilRef = useRef(0);
   const autoJoinInFlightRef = useRef(false);
   const autoReadyCooldownUntilRef = useRef(0);
   const autoStartCooldownUntilRef = useRef(0);
+  const lastAnimatedLogIdRef = useRef("");
 
   useEffect(() => {
     const socket: ClientSocket = io(SERVER_URL, { transports: ["websocket"] });
@@ -244,6 +260,7 @@ export function App() {
       setPrivateFeed((prev) => ["本局已结束。", ...prev].slice(0, 40));
     });
     socket.on("connect", () => {
+      setSocketConnected(true);
       const savedToken = localStorage.getItem(TOKEN_KEY);
       const savedRoom = localStorage.getItem(ROOM_KEY);
       if (!savedToken || !savedRoom) {
@@ -258,6 +275,9 @@ export function App() {
           setErrors((prev) => [`重连失败：${String(error)}`, ...prev].slice(0, 20));
         }
       });
+    });
+    socket.on("disconnect", () => {
+      setSocketConnected(false);
     });
 
     return () => {
@@ -281,13 +301,65 @@ export function App() {
   const me = publicState?.players.find((player) => player.id === myPlayerId);
   const currentActor = playersOrdered.find((player) => player.id === currentPlayerId);
   const myRole = privateState?.selfRole;
+  const pendingAction = publicState?.pendingAction;
+  const pendingUprisingInitiator = playersOrdered.find((player) => player.id === pendingAction?.initiatorPlayerId);
+  const pendingUprisingResponder = playersOrdered.find((player) => player.id === pendingAction?.responderPlayerId);
+  const isMyPendingFollowTurn = pendingAction?.kind === "slave_uprising" && pendingAction.responderPlayerId === myPlayerId;
+
+  useEffect(() => {
+    const actionableLogs =
+      publicState?.logs.filter((log) => ["peek", "swap", "swap_center", "reveal", "skill", "detain", "death", "win"].includes(log.type)) ??
+      [];
+    if (actionableLogs.length === 0) {
+      return;
+    }
+    if (!lastAnimatedLogIdRef.current) {
+      lastAnimatedLogIdRef.current = actionableLogs[actionableLogs.length - 1].id;
+      return;
+    }
+
+    const lastAnimatedIndex = actionableLogs.findIndex((log) => log.id === lastAnimatedLogIdRef.current);
+    const newLogs = lastAnimatedIndex >= 0 ? actionableLogs.slice(lastAnimatedIndex + 1) : actionableLogs.slice(-4);
+    if (newLogs.length === 0) {
+      return;
+    }
+
+    lastAnimatedLogIdRef.current = newLogs[newLogs.length - 1].id;
+    setActionFxQueue((prev) => [
+      ...prev,
+      ...newLogs.map((log) => ({
+        key: log.id,
+        type: log.type,
+        actorId: log.actorId,
+        targetId: log.targetId,
+        message: log.message,
+      })),
+    ]);
+  }, [publicState]);
+
+  useEffect(() => {
+    if (actionFx || actionFxQueue.length === 0) {
+      return;
+    }
+
+    const [nextFx, ...restQueue] = actionFxQueue;
+    setActionFx(nextFx);
+    setActionFxQueue(restQueue);
+
+    const timeoutMs = nextFx.type === "win" ? 2200 : nextFx.type === "reveal" || nextFx.type === "skill" ? 1000 : 900;
+    const timer = window.setTimeout(() => {
+      setActionFx((current) => (current?.key === nextFx.key ? null : current));
+    }, timeoutMs);
+
+    return () => window.clearTimeout(timer);
+  }, [actionFx, actionFxQueue]);
 
   useEffect(() => {
     if (!SIM_AUTO_MODE || publicState) {
       return;
     }
     const socket = socketRef.current;
-    if (!socket || !socket.connected) {
+    if (!socket || !socketConnected) {
       return;
     }
 
@@ -319,7 +391,7 @@ export function App() {
     }
 
     if (SIM_AUTO_MODE === "join") {
-      if (!SIM_ROOM || autoJoinInFlightRef.current || Date.now() < autoJoinCooldownUntilRef.current) {
+      if (!SIM_ROOM || autoJoinDoneRef.current || autoJoinInFlightRef.current || Date.now() < autoJoinCooldownUntilRef.current) {
         return;
       }
       autoJoinInFlightRef.current = true;
@@ -334,18 +406,20 @@ export function App() {
           autoJoinInFlightRef.current = false;
           if (!result.ok) {
             autoJoinCooldownUntilRef.current = Date.now() + 1200;
+            window.setTimeout(() => setAutoJoinRetryNonce((prev) => prev + 1), 1250);
             return;
           }
           setToken(result.data.token);
           setMyPlayerId(result.data.playerId);
           setRoomIdInput(result.data.roomId);
+          autoJoinDoneRef.current = true;
           localStorage.setItem(TOKEN_KEY, result.data.token);
           localStorage.setItem(ROOM_KEY, result.data.roomId);
           localStorage.setItem(NAME_KEY, desiredName);
         },
       );
     }
-  }, [playerName, publicState, token]);
+  }, [autoJoinRetryNonce, publicState, socketConnected, token]);
 
   useEffect(() => {
     if (!publicState || !me || !socketRef.current || publicState.phase !== "lobby") {
@@ -502,6 +576,7 @@ export function App() {
           const data = unwrapAck(result);
           setToken(data.token);
           setMyPlayerId(data.playerId);
+          setRoomIdInput(data.roomId);
           localStorage.setItem(TOKEN_KEY, data.token);
           localStorage.setItem(ROOM_KEY, data.roomId);
           localStorage.setItem(NAME_KEY, playerName.trim());
@@ -580,8 +655,7 @@ export function App() {
     const slaveTraderTargets = parseCommaIds(slaveTraderTargetsInput);
     const forceSlaveTraderTargets = parseCommaIds(forceSlaveTraderTargetsInput);
 
-    const sultanExecution = myRole === "sultan" && !!privateState?.selfCardFaceUp;
-    if ((roleNeedTarget(myRole) || sultanExecution) && !selectedTarget) {
+    if (roleNeedTarget(myRole) && !selectedTarget) {
       addError("请先选择目标玩家。");
       return;
     }
@@ -592,14 +666,13 @@ export function App() {
 
     switch (myRole) {
       case "sultan":
-        payload.targetPlayerId = selectedTarget || undefined;
+        if (privateState?.selfCardFaceUp && isMyTurn) {
+          payload.targetPlayerId = selectedTarget || undefined;
+        }
         break;
       case "assassin":
       case "guard":
         payload.targetPlayerId = selectedTarget;
-        break;
-      case "slave":
-        payload.followerIds = undefined;
         break;
       case "oracle":
         payload.oraclePrediction = oraclePrediction;
@@ -630,6 +703,18 @@ export function App() {
     );
   }
 
+  function doDeclineFollow(): void {
+    const socket = socketRef.current;
+    if (!socket || !publicState) {
+      return;
+    }
+    socket.emit("action:declineFollow", { roomId: publicState.roomId }, (result) => {
+      if (!result.ok) {
+        addError(`${result.error.code}: ${result.error.message}`);
+      }
+    });
+  }
+
   function leaveRoom(): void {
     const socket = socketRef.current;
     if (!socket || !publicState) {
@@ -640,9 +725,12 @@ export function App() {
       setMyPlayerId("");
       setSelectedTarget("");
       setNoteEditorFor("");
+      setActionFx(null);
+      setActionFxQueue([]);
       setForceSkillTarget("");
       setSlaveTraderTargetsInput("");
       setForceSlaveTraderTargetsInput("");
+      lastAnimatedLogIdRef.current = "";
       localStorage.removeItem(ROOM_KEY);
     });
   }
@@ -682,32 +770,67 @@ export function App() {
     );
   }
 
-  const actionDisabled = publicState.phase !== "in_game" || !isMyTurn || !me?.alive || (me?.skipActions ?? 0) > 0;
+  const actionDisabled =
+    publicState.phase !== "in_game" ||
+    !!pendingAction ||
+    !isMyTurn ||
+    !me?.alive ||
+    (me?.skipActions ?? 0) > 0;
   const myRoleMeta = myRole ? ROLE_META[myRole] : undefined;
   const canAnytimeCrown =
     myRole === "sultan" &&
     publicState.phase === "in_game" &&
+    !pendingAction &&
     !!me?.alive &&
     !privateState?.selfCardFaceUp;
-  const revealNeedTarget = roleNeedTarget(myRole) || (myRole === "sultan" && !!privateState?.selfCardFaceUp);
-  const revealDisabled = canAnytimeCrown ? false : actionDisabled || (revealNeedTarget && !selectedTarget);
+  const canFollowUprising =
+    myRole === "slave" && !!me && me.alive && !privateState?.selfCardFaceUp && isMyPendingFollowTurn;
+  const revealNeedTarget = !canFollowUprising && roleNeedTarget(myRole);
+  const revealDisabled = canFollowUprising ? false : canAnytimeCrown ? false : actionDisabled || (revealNeedTarget && !selectedTarget);
   const revealLabel =
     myRole === "sultan"
       ? privateState?.selfCardFaceUp
-        ? "处决目标（苏丹回合）"
+        ? "处决目标或结束回合"
         : "公开身份（可随时）"
-      : roleSkillLabel(myRole, false);
-  const canFollowUprising =
-    myRole === "slave" &&
-    !!me &&
-    me.alive &&
-    !privateState?.selfCardFaceUp &&
-    playersOrdered.some(
-      (player) =>
-        player.alive &&
-        player.revealedRole === "slave" &&
-        areAdjacentSeats(player.seatIndex, me.seatIndex, playersOrdered.length),
-    );
+      : roleSkillLabel(myRole, canFollowUprising);
+  const latestPrivateMessage = privateFeed[0] ?? "";
+  const recentPrivateMessages = privateFeed.slice(0, 8);
+  const describePlayerById = (playerId: string): string => {
+    const target = playersOrdered.find((player) => player.id === playerId);
+    if (!target) {
+      return `玩家 ${playerId.slice(0, 6)}`;
+    }
+    return `#${target.seatIndex + 1} ${target.name}`;
+  };
+  const tableFxClass = actionFx ? `fx-${actionFx.type.replace("_", "-")}` : "";
+  const seatFxClass = (playerId: string): string => {
+    if (!actionFx) {
+      return "";
+    }
+    const isActor = actionFx.actorId === playerId;
+    const isTarget = actionFx.targetId === playerId;
+
+    switch (actionFx.type) {
+      case "peek":
+        return isActor ? "fx-peek-source" : isTarget ? "fx-peek-target" : "";
+      case "swap":
+        return isActor || isTarget ? "fx-swap" : "";
+      case "swap_center":
+        return isActor ? "fx-swap-center" : "";
+      case "reveal":
+        return isActor || isTarget ? "fx-reveal" : "";
+      case "detain":
+        return isActor ? "fx-skill-cast" : isTarget ? "fx-detain" : "";
+      case "death":
+        return isActor ? "fx-skill-cast" : isTarget ? "fx-death" : "";
+      case "skill":
+        return isActor ? "fx-skill-cast" : isTarget ? "fx-skill-target" : "";
+      case "win":
+        return "fx-win";
+      default:
+        return "";
+    }
+  };
   const shellClassName = `shell${SIM_COMPACT ? " shell-compact" : ""}${SIM_EMBED ? " shell-embed" : ""}`;
 
   return (
@@ -721,7 +844,11 @@ export function App() {
           </p>
         </div>
         <div className="topbar-meta">
-          <span>你是：{me?.name}</span>
+          <span>你是：{(me?.name ?? playerName) || "-"}</span>
+          <button className={`btn-outline privacy-toggle ${privacyMaskOn ? "is-on" : ""}`} onClick={() => setPrivacyMaskOn((prev) => !prev)}>
+            <EyeToggleIcon masked={privacyMaskOn} />
+            {privacyMaskOn ? "显示私密" : "隐藏私密"}
+          </button>
           <button className="btn-outline" onClick={() => setShowRuleModal(true)}>
             查看规则
           </button>
@@ -737,6 +864,13 @@ export function App() {
             <h2>圆桌显示区</h2>
             <p>点击头像可选目标并备注，当前行动玩家高亮</p>
           </div>
+          {pendingAction?.kind === "slave_uprising" ? (
+            <div className="pending-banner">
+              起义连锁中：{pendingUprisingInitiator?.name ?? "未知玩家"} 发起起义，正在等待
+              {pendingUprisingResponder?.name ?? "下一位奴隶"} 选择跟随或放弃。
+            </div>
+          ) : null}
+          {actionFx ? <div className={`action-fx-banner is-${actionFx.type}`}>{actionFx.message}</div> : null}
           {publicState.phase === "lobby" ? (
             <div className="ready-overview">
               {playersOrdered.map((player) => (
@@ -746,7 +880,7 @@ export function App() {
               ))}
             </div>
           ) : null}
-          <div className="round-table">
+          <div className={`round-table ${tableFxClass}`.trim()}>
             <div className="table-center">
               <p>第 {publicState.turn.round} 轮</p>
               <p>当前行动：{currentActor?.name ?? "-"}</p>
@@ -758,9 +892,11 @@ export function App() {
               const isSelf = player.id === myPlayerId;
               const note = notesByPlayerId[player.id];
               const showFront = player.alive && !!revealedRole;
+              const showCrown = revealedRole === "sultan" && player.alive && publicState.phase === "in_game";
 
               return (
-                <div key={player.id} className="seat-wrap" style={seatPosition(index, playersOrdered.length)}>
+                <div key={player.id} className={`seat-wrap ${seatFxClass(player.id)}`.trim()} style={seatPosition(index, playersOrdered.length)}>
+                  {showCrown ? <CrownMarker /> : null}
                   <button
                     className={`seat-btn ${current ? "current" : ""} ${selected ? "selected" : ""} ${!player.alive ? "dead" : ""}`}
                     onClick={() => openSeatOverlay(player.id)}
@@ -825,7 +961,9 @@ export function App() {
         <aside className="ops-sidebar">
           <article className="panel panel-role">
             <h2>我的身份</h2>
-            {myRole && myRoleMeta ? (
+            {privacyMaskOn ? (
+              <p className="privacy-mask-note">隐私遮罩已开启，身份信息已隐藏。</p>
+            ) : myRole && myRoleMeta ? (
               <div className="my-role-card">
                 <RoleAvatar role={myRole} label={myRoleMeta.short} size="xl" />
                 <div>
@@ -840,10 +978,54 @@ export function App() {
               <p>尚未分配身份。</p>
             )}
             <div className="turn-box">
-              <p>{isMyTurn ? "现在轮到你行动。" : "请等待其他玩家行动。"}</p>
+              <p>
+                {isMyPendingFollowTurn
+                  ? "当前需要你决定是否跟随起义。"
+                  : pendingAction?.kind === "slave_uprising"
+                    ? `正在等待 ${pendingUprisingResponder?.name ?? "指定玩家"} 响应起义。`
+                    : isMyTurn
+                      ? "现在轮到你行动。"
+                      : "请等待其他玩家行动。"}
+              </p>
               <p>状态：{me?.alive ? "存活" : "阵亡"}</p>
               <p>拘留：{(me?.skipActions ?? 0) > 0 ? `剩余 ${me?.skipActions} 次` : "无"}</p>
             </div>
+          </article>
+
+          <article className="panel panel-private">
+            <h2>偷看 / 占卜结果</h2>
+            {privacyMaskOn ? (
+              <p className="privacy-mask-note">隐私遮罩已开启，偷看与占卜结果已隐藏。</p>
+            ) : (
+              <>
+                <p className="private-alert">{latestPrivateMessage || "暂无新的结果反馈。"}</p>
+                <p>当前身份：{myRole ? ROLE_META[myRole].name : "-"}</p>
+                <p>牌面状态：{privateState?.selfCardFaceUp ? "已公开" : "暗置"}</p>
+                <p>占卜选择：{privateState?.oraclePrediction ? factionName(privateState.oraclePrediction) : "-"}</p>
+                <p className="private-section-title">偷看 / 占卜结果</p>
+                <ul className="text-list text-list-compact">
+                  {(privateState?.privateKnowledge.length ?? 0) === 0 ? (
+                    <li>暂无结果。</li>
+                  ) : (
+                    privateState?.privateKnowledge.map((note, index) => (
+                      <li key={`${note.subjectType}-${note.subjectId}-${index}`}>
+                        你{note.source === "peek" ? "偷看" : "占卜"}到
+                        {note.subjectType === "center" ? "中间牌" : describePlayerById(note.subjectId)}
+                        是{ROLE_META[note.role].name}
+                      </li>
+                    ))
+                  )}
+                </ul>
+                <p className="private-section-title">最近反馈</p>
+                <ul className="text-list text-list-compact">
+                  {recentPrivateMessages.length === 0 ? (
+                    <li>暂无反馈。</li>
+                  ) : (
+                    recentPrivateMessages.map((line, index) => <li key={`${line}-${index}`}>{line}</li>)
+                  )}
+                </ul>
+              </>
+            )}
           </article>
 
           <article className="panel">
@@ -872,8 +1054,9 @@ export function App() {
 
           <article className="panel skill-panel">
             <h2>身份技能</h2>
-            <p className="skill-title">{revealLabel}</p>
-            {myRole ? (
+            <p className="skill-title">{privacyMaskOn ? "已隐藏（关闭隐私遮罩后查看）" : revealLabel}</p>
+            {privacyMaskOn ? <p className="privacy-mask-note">隐私遮罩已开启，技能详情已隐藏。</p> : null}
+            {myRole && !privacyMaskOn ? (
               <div className="skill-hero">
                 <img className="skill-hero-art" src={ROLE_META[myRole].icon} alt={`${ROLE_META[myRole].name}角色图`} />
                 <div className="skill-hero-meta">
@@ -885,7 +1068,7 @@ export function App() {
                 </div>
               </div>
             ) : null}
-            {myRole === "oracle" ? (
+            {!privacyMaskOn && myRole === "oracle" ? (
               <>
                 <label>预测阵营</label>
                 <select value={oraclePrediction} onChange={(e) => setOraclePrediction(e.target.value as WinFaction)}>
@@ -894,10 +1077,13 @@ export function App() {
                 </select>
               </>
             ) : null}
-            {myRole === "slave" ? (
-              <p className="tip">{canFollowUprising ? "你满足跟随起义条件，可直接跟随。" : "你可直接发起起义。"}</p>
+            {!privacyMaskOn && myRole === "slave" ? (
+              <p className="tip">{canFollowUprising ? "当前轮到你决定是否跟随起义。" : "你可在自己的回合发起起义。"}</p>
             ) : null}
-            {myRole === "slave_trader" ? (
+            {!privacyMaskOn && myRole === "sultan" && privateState?.selfCardFaceUp ? (
+              <p className="tip">你可以选择一个已公开的革命目标处决；如果不选目标，也可以直接结束回合。</p>
+            ) : null}
+            {!privacyMaskOn && myRole === "slave_trader" ? (
               <>
                 <label>链式目标列表</label>
                 <input
@@ -913,7 +1099,7 @@ export function App() {
                 </div>
               </>
             ) : null}
-            {myRole === "grand_official" ? (
+            {!privacyMaskOn && myRole === "grand_official" ? (
               <>
                 <label>强制技能二级目标（可选）</label>
                 <select value={forceSkillTarget} onChange={(e) => setForceSkillTarget(e.target.value)}>
@@ -943,26 +1129,17 @@ export function App() {
                 </div>
               </>
             ) : null}
-            {roleNeedTarget(myRole) ? <p className="tip">该技能需要先选择目标。</p> : null}
-            <button disabled={revealDisabled} className={myRole === "assassin" ? "skill-fire is-kill" : "skill-fire"} onClick={doReveal}>
-              {revealLabel}
-            </button>
-          </article>
-
-          <article className="panel">
-            <h2>私密情报</h2>
-            <p>当前身份：{myRole ? ROLE_META[myRole].name : "-"}</p>
-            <p>牌面状态：{privateState?.selfCardFaceUp ? "已公开" : "暗置"}</p>
-            <p>占卜选择：{privateState?.oraclePrediction ? factionName(privateState.oraclePrediction) : "-"}</p>
-            <ul className="text-list">
-              {privateState?.privateKnowledge.map((note, index) => (
-                <li key={`${note.subjectType}-${note.subjectId}-${index}`}>
-                  {note.source === "peek" ? "偷看" : "占卜"}看到
-                  {note.subjectType === "center" ? "中间牌" : `玩家 ${note.subjectId}`}为
-                  {ROLE_META[note.role].name}
-                </li>
-              ))}
-            </ul>
+            {!privacyMaskOn && !canFollowUprising && roleNeedTarget(myRole) ? <p className="tip">该技能需要先选择目标。</p> : null}
+            <div className="row">
+              <button disabled={revealDisabled} className={myRole === "assassin" ? "skill-fire is-kill" : "skill-fire"} onClick={doReveal}>
+                {privacyMaskOn ? "执行身份技能" : revealLabel}
+              </button>
+              {!privacyMaskOn && canFollowUprising ? (
+                <button className="btn-outline" onClick={doDeclineFollow}>
+                  放弃跟随
+                </button>
+              ) : null}
+            </div>
           </article>
 
           <article className="panel">
@@ -970,15 +1147,6 @@ export function App() {
             <ul className="text-list">
               {publicState.logs.map((log) => (
                 <li key={log.id}>{log.message}</li>
-              ))}
-            </ul>
-          </article>
-
-          <article className="panel">
-            <h2>私密提示</h2>
-            <ul className="text-list">
-              {privateFeed.map((line, index) => (
-                <li key={`${line}-${index}`}>{line}</li>
               ))}
             </ul>
           </article>
@@ -1121,6 +1289,55 @@ function RuleGlyph(props: { kind: RuleGlyphKind; size?: number }) {
     default:
       return null;
   }
+}
+
+function EyeToggleIcon(props: { masked: boolean }) {
+  if (props.masked) {
+    return (
+      <svg className="eye-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3 3l18 18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <path
+          d="M10.2 6.7A9.5 9.5 0 0 1 12 6.5c6 0 9.5 5.5 9.5 5.5a16 16 0 0 1-3.3 3.8"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M6.2 8.3A16 16 0 0 0 2.5 12s3.5 5.5 9.5 5.5a9.2 9.2 0 0 0 4-.9"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+  return (
+    <svg className="eye-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M2.5 12s3.5-5.5 9.5-5.5 9.5 5.5 9.5 5.5-3.5 5.5-9.5 5.5S2.5 12 2.5 12z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="12" r="2.4" fill="none" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function CrownMarker() {
+  const [failed, setFailed] = useState(false);
+
+  if (failed) {
+    return <span className="seat-crown-fallback">加冕</span>;
+  }
+
+  return <img className="seat-crown" src={HAT_ICON} alt="加冕王冠" onError={() => setFailed(true)} />;
 }
 
 function RoleAvatar(props: { role: Role; label: string; size: "sm" | "xl" }) {

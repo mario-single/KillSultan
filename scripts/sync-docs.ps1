@@ -29,15 +29,21 @@ $mappings = @(
     )
   },
   @{
-    Source = "docs/开发TODO.md"
+    Source = "docs/lxhtodo.md"
     Targets = @(
-      "apps/client/public/docs/开发TODO.md"
+      "apps/client/public/docs/lxhtodo.md"
     )
   },
   @{
     Source = "docs/AI交接记忆库.md"
     Targets = @(
       "apps/client/public/docs/AI交接记忆库.md"
+    )
+  },
+  @{
+    Source = "docs/面向开发者文档.md"
+    Targets = @(
+      "apps/client/public/docs/面向开发者文档.md"
     )
   }
 )

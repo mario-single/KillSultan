@@ -87,6 +87,12 @@ export interface GameEffects {
   noSwapBackA?: string;
   noSwapBackB?: string;
   noSwapBackSequence?: number;
+  pendingSlaveUprising?: {
+    initiatorPlayerId: string;
+    currentResponderId: string;
+    queue: string[];
+    resolvedPlayerIds: string[];
+  };
 }
 
 export interface WinResult {
@@ -135,6 +141,11 @@ export interface PublicGameView {
   centerCardCount: 1;
   turn: TurnState;
   currentPlayerId?: string;
+  pendingAction?: {
+    kind: "slave_uprising";
+    initiatorPlayerId: string;
+    responderPlayerId: string;
+  };
   logs: LogEntry[];
   winner?: WinResult;
 }

@@ -72,11 +72,24 @@ npm run dev
 - 房间号必须完全一致（建议全大写）。
 - 游戏开始后不支持新玩家中途加入，仅支持原玩家断线重连。
 
-## 文档入口
+## 文档体系
 
-- 新手开局指南（简体中文）：[docs/quickstart-zh.md](docs/quickstart-zh.md)
-- 玩家规则手册（Markdown）：[docs/玩家规则手册.md](docs/玩家规则手册.md)
-- 玩家规则手册（DOCX）：[docs/玩家规则手册.docx](docs/玩家规则手册.docx)
+- `README.md`
+  - 给第一次接触项目的人看，用来理解项目是什么、怎么启动、文档在哪里。
+- [docs/quickstart-zh.md](docs/quickstart-zh.md)
+  - 给想快速开一局的人看。
+- [docs/玩家规则手册.md](docs/玩家规则手册.md)
+  - 给玩家看，是正式规则口径。
+- [docs/玩家规则手册.docx](docs/玩家规则手册.docx)
+  - 玩家规则手册的 DOCX 版本。
+- [docs/面向开发者文档.md](docs/面向开发者文档.md)
+  - 给开发者看，说明宏观架构、实现方式与维护边界。
+- [docs/AI交接记忆库.md](docs/AI交接记忆库.md)
+  - 给 AI 看，用来保存上下文和协作约定。
+- [docs/lxhtodo.md](docs/lxhtodo.md)
+  - 给开发者 `lxh` 自己看的计划文档。
+- [docs/图片命名规范.txt](docs/图片命名规范.txt)
+  - 规定工程中的图片资源命名方式。
 
 ## 项目结构
 
@@ -87,7 +100,11 @@ apps/
 packages/
   shared/   # 前后端共享类型、规则与协议
 docs/
+  面向开发者文档.md
+  AI交接记忆库.md
   quickstart-zh.md
+  lxhtodo.md
+  图片命名规范.txt
   玩家规则手册.md
   玩家规则手册.docx
 ```

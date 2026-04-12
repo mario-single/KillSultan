@@ -29,6 +29,13 @@ export function buildPublicState(state: GameState): PublicGameView {
     centerCardCount: 1,
     turn: { ...state.turn },
     currentPlayerId: state.seatOrder[state.turn.currentSeatIndex],
+    pendingAction: state.effects.pendingSlaveUprising
+      ? {
+          kind: "slave_uprising",
+          initiatorPlayerId: state.effects.pendingSlaveUprising.initiatorPlayerId,
+          responderPlayerId: state.effects.pendingSlaveUprising.currentResponderId,
+        }
+      : undefined,
     logs: state.logs.slice(-state.settings.revealLogLimit),
     winner: state.winner,
   };

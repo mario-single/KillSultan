@@ -316,7 +316,7 @@ export class GameEngine {
   ): Promise<EngineMutationResult> {
     const room = await this.getRoomOrThrow(roomId);
     const actorId = this.resolvePlayerId(room, socketId);
-    const state = room.state;
+    const state = structuredClone(room.state);
     this.assertActionTurn(state, actorId, "peek");
 
     const actor = this.getPlayerOrThrow(state, actorId);
@@ -337,7 +337,7 @@ export class GameEngine {
       turnSequence: state.turn.sequence,
     });
     this.trimKnowledge(actor);
-    this.addLog(state, "peek", `${actor.name} 偷看了 ${target.name} 的身份`, actor.id, target.id);
+    this.addLog(state, "peek", `${actor.name} 发动了偷看，目标是 ${target.name}。`, actor.id, target.id);
 
     const privateNotice = {
       message: `偷看结果：${target.name} 的身份是 ${roleNameZh(target.card.role)}。`,
@@ -349,11 +349,12 @@ export class GameEngine {
     };
 
     this.finishActionAndAdvance(state);
-    this.markUpdated(state);
+    room.state = state;
+    this.markUpdated(room.state);
     await this.persist(room);
     return {
-      scopedState: buildPlayerScopedState(state, actor.id),
-      publicState: buildPublicState(state),
+      scopedState: buildPlayerScopedState(room.state, actor.id),
+      publicState: buildPublicState(room.state),
       privateNotice,
     };
   }
@@ -383,7 +384,7 @@ export class GameEngine {
     const actorCard = { ...actor.card };
     actor.card = { ...target.card, version: target.card.version + 1 };
     target.card = { ...actorCard, version: actorCard.version + 1 };
-    this.addLog(state, "swap", `${actor.name} 与 ${target.name} 交换了暗牌`, actor.id, target.id);
+    this.addLog(state, "swap", `${actor.name} 与 ${target.name} 交换了暗牌。`, actor.id, target.id);
 
     this.finishActionAndAdvance(state);
     this.markUpdated(state);
@@ -419,7 +420,7 @@ export class GameEngine {
       faceUp: false,
       version: actorCard.version + 1,
     };
-    this.addLog(state, "swap_center", `${actor.name} 与中间牌完成了交换`, actor.id);
+    this.addLog(state, "swap_center", `${actor.name} 与中间牌完成了交换。`, actor.id);
 
     this.finishActionAndAdvance(state);
     this.markUpdated(state);
@@ -437,42 +438,107 @@ export class GameEngine {
   ): Promise<EngineMutationResult> {
     const room = await this.getRoomOrThrow(roomId);
     const actorId = this.resolvePlayerId(room, socketId);
-    const state = room.state;
+    const state = structuredClone(room.state);
     const actor = this.getPlayerOrThrow(state, actorId);
+    const pendingUprising = state.effects.pendingSlaveUprising;
+
+    if (pendingUprising?.currentResponderId === actorId) {
+      if (actor.card.role !== "slave") {
+        throw new GameError("INVALID_FOLLOW", "当前只有奴隶可以响应起义跟随。");
+      }
+      if (actor.card.faceUp) {
+        throw new GameError("ALREADY_REVEALED", "该奴隶已经公开，不能重复跟随。");
+      }
+      if (!actor.alive) {
+        throw new GameError("ACTOR_DEAD", "死亡玩家不能跟随起义。");
+      }
+      if (!actor.connected) {
+        throw new GameError("PLAYER_OFFLINE", "离线玩家不能跟随起义。");
+      }
+
+      actor.card.faceUp = true;
+      actor.card.version += 1;
+      this.addLog(
+        state,
+        "reveal",
+        `${actor.name} 跟随起义公开了身份牌，身份是${roleNameZh(actor.card.role)}。`,
+        actor.id,
+        pendingUprising.initiatorPlayerId,
+      );
+      this.resolveSlaveUprisingResponse(state, actor.id, true);
+
+      room.state = state;
+      this.markUpdated(room.state);
+      await this.persist(room);
+      return {
+        scopedState: buildPlayerScopedState(room.state, actor.id),
+        publicState: buildPublicState(room.state),
+      };
+    }
 
     const isSultan = actor.card.role === "sultan";
     const crownAnytime = this.canSultanCrownAnytime(state, actor, payload);
+    const wasFaceUp = actor.card.faceUp;
 
     if (!crownAnytime) {
       this.assertActionTurn(state, actorId, "reveal");
     }
 
-    if (actor.card.faceUp) {
+    if (wasFaceUp) {
       if (!isSultan) {
         throw new GameError("ALREADY_REVEALED", "该身份牌已经公开。");
       }
-      if (!payload.targetPlayerId) {
-        throw new GameError("MISSING_TARGET", "苏丹已公开，轮到你时可指定处决目标。");
-      }
-    } else {
+    }
+
+    this.validateRevealPayload(state, actor, payload, 0);
+
+    if (!wasFaceUp) {
       actor.card.faceUp = true;
       actor.card.version += 1;
-      this.addLog(state, "reveal", `${actor.name} 公开了身份牌`, actor.id);
+      this.addLog(state, "reveal", `${actor.name} 公开了身份牌，身份是${roleNameZh(actor.card.role)}。`, actor.id);
     }
 
     const privateNotice = this.executeRoleSkill(state, actor.id, payload, false, 0);
 
     if (!crownAnytime) {
-      this.finishActionAndAdvance(state);
+      if (isSultan && wasFaceUp && !payload.targetPlayerId) {
+        this.addLog(state, "skill", `${actor.name} 选择不处决任何目标，直接结束了本回合。`, actor.id);
+      }
+      if (!state.effects.pendingSlaveUprising) {
+        this.finishActionAndAdvance(state);
+      }
     } else {
       this.addLog(state, "skill", `${actor.name} 在非自己回合完成了加冕公开。`, actor.id);
     }
-    this.markUpdated(state);
+
+    room.state = state;
+    this.markUpdated(room.state);
     await this.persist(room);
     return {
-      scopedState: buildPlayerScopedState(state, actor.id),
-      publicState: buildPublicState(state),
+      scopedState: buildPlayerScopedState(room.state, actor.id),
+      publicState: buildPublicState(room.state),
       privateNotice,
+    };
+  }
+
+  async handleDeclineSlaveUprisingFollow(roomId: string, socketId: string): Promise<EngineMutationResult> {
+    const room = await this.getRoomOrThrow(roomId);
+    const actorId = this.resolvePlayerId(room, socketId);
+    const state = structuredClone(room.state);
+    const pendingUprising = state.effects.pendingSlaveUprising;
+
+    if (!pendingUprising || pendingUprising.currentResponderId !== actorId) {
+      throw new GameError("NO_PENDING_FOLLOW", "当前没有等待你响应的起义跟随。");
+    }
+
+    this.resolveSlaveUprisingResponse(state, actorId, false);
+
+    room.state = state;
+    this.markUpdated(room.state);
+    await this.persist(room);
+    return {
+      scopedState: buildPlayerScopedState(room.state, actorId),
+      publicState: buildPublicState(room.state),
     };
   }
 
@@ -490,6 +556,14 @@ export class GameEngine {
     if (player) {
       player.connected = false;
       this.addLog(room.state, "system", `${player.name} 断开连接`, player.id);
+      if (
+        room.state.phase === "in_game" &&
+        !room.state.winner &&
+        room.state.effects.pendingSlaveUprising?.currentResponderId === player.id
+      ) {
+        this.addLog(room.state, "skill", `${player.name} 当前离线，视为放弃跟随起义。`, player.id);
+        this.resolveSlaveUprisingResponse(room.state, player.id, false);
+      }
       this.markUpdated(room.state);
       await this.persist(room);
     }
@@ -548,10 +622,11 @@ export class GameEngine {
         if (state.effects.sultanPlayerId !== actor.id || state.effects.sultanCrownedRound === undefined) {
           state.effects.sultanPlayerId = actor.id;
           state.effects.sultanCrownedRound = state.turn.round;
-          this.addLog(state, "skill", `${actor.name} 完成加冕，成为明牌苏丹`, actor.id);
+          this.addLog(state, "skill", `${actor.name} 完成加冕，成为明牌苏丹。`, actor.id);
         }
         if (payload.targetPlayerId) {
           const target = this.getPlayerOrThrow(state, payload.targetPlayerId);
+          this.addLog(state, "skill", `${actor.name} 选择处决 ${target.name}。`, actor.id, target.id);
           if (!target.card.faceUp && fail("INVALID_EXECUTION_TARGET", "苏丹只能处决已公开目标。")) {
             break;
           }
@@ -573,6 +648,7 @@ export class GameEngine {
           break;
         }
         const target = this.getPlayerOrThrow(state, payload.targetPlayerId!);
+        this.addLog(state, "skill", `${actor.name} 选择刺杀 ${target.name}。`, actor.id, target.id);
         if (!target.alive && fail("INVALID_TARGET", "目标已经死亡。")) {
           break;
         }
@@ -602,36 +678,24 @@ export class GameEngine {
           break;
         }
         const target = this.getPlayerOrThrow(state, payload.targetPlayerId!);
+        this.addLog(state, "skill", `${actor.name} 发动拘留，目标是 ${target.name}。`, actor.id, target.id);
         if (!target.alive && fail("INVALID_TARGET", "目标已经死亡。")) {
           break;
         }
         if (this.isGuardCharmed(state, actor.id)) {
-          this.addLog(state, "skill", `${actor.name} 被肚皮舞娘魅惑，本回合不能拘留。`, actor.id);
+          this.addLog(state, "skill", `${actor.name} 的拘留失败：被肚皮舞娘魅惑。`, actor.id, target.id);
           break;
         }
         if (target.card.role === "sultan" || target.card.role === "guard") {
-          this.addLog(state, "skill", `${actor.name} 试图拘留 ${target.name}，但目标免疫。`, actor.id, target.id);
+          this.addLog(state, "skill", `${actor.name} 的拘留失败：${target.name} 对拘留免疫。`, actor.id, target.id);
           break;
         }
         target.skipActions += 1;
-        this.addLog(state, "detain", `${actor.name} 拘留了 ${target.name}`, actor.id, target.id);
+        this.addLog(state, "detain", `${actor.name} 拘留了 ${target.name}。`, actor.id, target.id);
         break;
       }
       case "slave": {
-        const followerIds = payload.followerIds ?? [];
-        followerIds.forEach((id) => {
-          const follower = state.players[id];
-          if (!follower || !follower.alive || follower.card.faceUp || follower.card.role !== "slave") {
-            return;
-          }
-          if (!this.areAdjacent(state, actor.id, follower.id)) {
-            return;
-          }
-          follower.card.faceUp = true;
-          follower.card.version += 1;
-          this.addLog(state, "skill", `${follower.name} 响应了奴隶起义`, follower.id);
-        });
-        this.addLog(state, "skill", `${actor.name} 发动了奴隶起义`, actor.id);
+        this.startSlaveUprising(state, actor.id);
         break;
       }
       case "oracle": {
@@ -665,10 +729,10 @@ export class GameEngine {
           return { subjectType: "player" as const, subjectId: target.id, role: target.card.role };
         });
         this.trimKnowledge(actor);
-        this.addLog(state, "skill", `${actor.name} 完成了占卜并查看三张牌`, actor.id);
+        this.addLog(state, "skill", `${actor.name} 发动了占卜。`, actor.id);
         if (!forced) {
           return {
-            message: "占卜完成，私密结果已更新。",
+            message: "占卜结果已更新。",
             detail: {
               prediction: actor.oraclePrediction,
               predictionNameZh: factionNameZh(actor.oraclePrediction),
@@ -694,13 +758,14 @@ export class GameEngine {
             this.addLog(state, "skill", `${actor.name} 选择了无效目标，技能终止。`, actor.id);
             break;
           }
+          this.addLog(state, "skill", `${actor.name} 检查了 ${target.name}。`, actor.id, target.id);
           if (target.card.role === "slave") {
             target.skipActions += 1;
             repeated += 1;
-            this.addLog(state, "detain", `${actor.name} 识别奴隶并拘留了 ${target.name}`, actor.id, target.id);
+            this.addLog(state, "detain", `${actor.name} 识别出奴隶并拘留了 ${target.name}。`, actor.id, target.id);
             continue;
           }
-          this.addLog(state, "skill", `${actor.name} 选择了 ${target.name}，其并非奴隶，技能无事发生。`, actor.id, target.id);
+          this.addLog(state, "skill", `${actor.name} 检查失败：${target.name} 并非奴隶，链式效果终止。`, actor.id, target.id);
           break;
         }
         if (repeated > 0) {
@@ -747,7 +812,13 @@ export class GameEngine {
     if (!target.card.faceUp) {
       target.card.faceUp = true;
       target.card.version += 1;
-      this.addLog(state, "reveal", `${target.name} 被强制公开身份牌`, byPlayer.id, target.id);
+      this.addLog(
+        state,
+        "reveal",
+        `${target.name} 被强制公开身份牌，身份是${roleNameZh(target.card.role)}。`,
+        byPlayer.id,
+        target.id,
+      );
     }
 
     const converted: ActionRevealPayload = {
@@ -759,6 +830,214 @@ export class GameEngine {
       forceSkill: forcePayload,
     };
     this.executeRoleSkill(state, target.id, converted, true, depth);
+  }
+
+  private validateRevealPayload(
+    state: GameState,
+    actor: PlayerState,
+    payload: ActionRevealPayload,
+    depth: number,
+  ): void {
+    switch (actor.card.role) {
+      case "sultan": {
+        if (!payload.targetPlayerId) {
+          return;
+        }
+        const target = this.getPlayerOrThrow(state, payload.targetPlayerId);
+        if (!target.card.faceUp) {
+          throw new GameError("INVALID_EXECUTION_TARGET", "苏丹只能处决已公开目标。");
+        }
+        if (effectiveFaction(target) !== "rebels") {
+          throw new GameError("INVALID_EXECUTION_TARGET", "目标不是公开的革命阵营角色。");
+        }
+        if (!target.alive) {
+          throw new GameError("INVALID_EXECUTION_TARGET", "目标已经死亡。");
+        }
+        return;
+      }
+      case "assassin": {
+        if (!payload.targetPlayerId) {
+          throw new GameError("MISSING_TARGET", "刺客公开时必须指定刺杀目标。");
+        }
+        const target = this.getPlayerOrThrow(state, payload.targetPlayerId);
+        if (!target.alive) {
+          throw new GameError("INVALID_TARGET", "目标已经死亡。");
+        }
+        if (target.id === actor.id) {
+          throw new GameError("INVALID_TARGET", "刺客不能刺杀自己。");
+        }
+        return;
+      }
+      case "guard": {
+        if (!payload.targetPlayerId) {
+          throw new GameError("MISSING_TARGET", "守卫公开时必须指定拘留目标。");
+        }
+        const target = this.getPlayerOrThrow(state, payload.targetPlayerId);
+        if (!target.alive) {
+          throw new GameError("INVALID_TARGET", "目标已经死亡。");
+        }
+        return;
+      }
+      case "oracle": {
+        if (!payload.oraclePrediction) {
+          throw new GameError("MISSING_PREDICTION", "占卜师必须选择预言阵营。");
+        }
+        payload.inspectSubjects?.forEach((subject) => {
+          if (subject.subjectType === "player") {
+            this.getPlayerOrThrow(state, subject.subjectId);
+          }
+        });
+        return;
+      }
+      case "slave_trader": {
+        if ((payload.slaveTraderTargets ?? []).length === 0) {
+          throw new GameError("MISSING_TARGET", "奴隶贩子需要至少一个目标。");
+        }
+        return;
+      }
+      case "grand_official": {
+        if (!payload.targetPlayerId) {
+          throw new GameError("MISSING_TARGET", "大官必须指定被强制执行技能的玩家。");
+        }
+        if (depth >= 2) {
+          throw new GameError("FORCE_CHAIN_TOO_DEEP", "强制技能链层级过深。");
+        }
+        const target = this.getPlayerOrThrow(state, payload.targetPlayerId);
+        if (!target.alive) {
+          throw new GameError("INVALID_TARGET", "被强制执行技能的目标已死亡。");
+        }
+        const forcedPayload: ActionRevealPayload = {
+          targetPlayerId: payload.forceSkill?.targetPlayerId,
+          followerIds: payload.forceSkill?.followerIds,
+          slaveTraderTargets: payload.forceSkill?.slaveTraderTargets,
+          oraclePrediction: payload.forceSkill?.oraclePrediction,
+          inspectSubjects: payload.forceSkill?.inspectSubjects,
+          forceSkill: payload.forceSkill,
+        };
+        this.validateRevealPayload(state, target, forcedPayload, depth + 1);
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  private startSlaveUprising(state: GameState, initiatorPlayerId: string): void {
+    const initiator = this.getPlayerOrThrow(state, initiatorPlayerId);
+    this.addLog(state, "skill", `${initiator.name} 发起了起义。`, initiator.id);
+
+    const immediate = this.checkWin(state);
+    if (immediate) {
+      this.applyWin(state, immediate);
+      return;
+    }
+
+    const queue = this.collectAdjacentSlaveFollowers(state, initiator.id, new Set([initiator.id]));
+    if (queue.length === 0) {
+      return;
+    }
+
+    const currentResponderId = queue.shift()!;
+    state.effects.pendingSlaveUprising = {
+      initiatorPlayerId: initiator.id,
+      currentResponderId,
+      queue,
+      resolvedPlayerIds: [initiator.id],
+    };
+
+    const responder = this.getPlayerOrThrow(state, currentResponderId);
+    this.addLog(state, "skill", `${initiator.name} 的起义正在扩散，等待 ${responder.name} 决定是否跟随。`, initiator.id, responder.id);
+    this.advancePendingSlaveUprisingIfNeeded(state);
+  }
+
+  private resolveSlaveUprisingResponse(
+    state: GameState,
+    responderPlayerId: string,
+    joinUprising: boolean,
+  ): void {
+    const pending = state.effects.pendingSlaveUprising;
+    if (!pending || pending.currentResponderId !== responderPlayerId) {
+      throw new GameError("NO_PENDING_FOLLOW", "当前没有等待该玩家响应的起义跟随。");
+    }
+
+    const initiator = this.getPlayerOrThrow(state, pending.initiatorPlayerId);
+    const responder = this.getPlayerOrThrow(state, responderPlayerId);
+    if (!pending.resolvedPlayerIds.includes(responderPlayerId)) {
+      pending.resolvedPlayerIds.push(responderPlayerId);
+    }
+
+    if (joinUprising) {
+      this.addLog(state, "skill", `${responder.name} 跟随了 ${initiator.name} 发起的起义。`, responder.id, initiator.id);
+      const immediate = this.checkWin(state);
+      if (immediate) {
+        this.applyWin(state, immediate);
+        return;
+      }
+      const excluded = new Set<string>([...pending.resolvedPlayerIds, ...pending.queue]);
+      this.collectAdjacentSlaveFollowers(state, responder.id, excluded).forEach((candidateId) => {
+        pending.queue.push(candidateId);
+      });
+    } else {
+      this.addLog(state, "skill", `${responder.name} 放弃了跟随 ${initiator.name} 发起的起义。`, responder.id, initiator.id);
+    }
+
+    this.advancePendingSlaveUprisingIfNeeded(state);
+  }
+
+  private collectAdjacentSlaveFollowers(
+    state: GameState,
+    sourcePlayerId: string,
+    excluded: Set<string>,
+  ): string[] {
+    return this.adjacentPlayers(state, sourcePlayerId).filter((candidateId) => {
+      if (excluded.has(candidateId)) {
+        return false;
+      }
+      const candidate = state.players[candidateId];
+      return !!candidate && candidate.alive && !candidate.card.faceUp && candidate.card.role === "slave";
+    });
+  }
+
+  private advancePendingSlaveUprisingIfNeeded(state: GameState): void {
+    const pending = state.effects.pendingSlaveUprising;
+    if (!pending || state.winner || state.phase !== "in_game") {
+      return;
+    }
+
+    while (true) {
+      const responder = state.players[pending.currentResponderId];
+      if (responder && responder.alive && !responder.card.faceUp && responder.card.role === "slave" && responder.connected) {
+        return;
+      }
+
+      if (responder && !pending.resolvedPlayerIds.includes(responder.id)) {
+        pending.resolvedPlayerIds.push(responder.id);
+        if (!responder.connected) {
+          this.addLog(state, "skill", `${responder.name} 当前离线，视为放弃跟随起义。`, responder.id, pending.initiatorPlayerId);
+        }
+      }
+
+      const nextResponderId = pending.queue.shift();
+      if (!nextResponderId) {
+        delete state.effects.pendingSlaveUprising;
+        this.finishActionAndAdvance(state);
+        return;
+      }
+
+      pending.currentResponderId = nextResponderId;
+      const nextResponder = state.players[nextResponderId];
+      if (nextResponder && nextResponder.alive && !nextResponder.card.faceUp && nextResponder.card.role === "slave" && nextResponder.connected) {
+        const initiator = this.getPlayerOrThrow(state, pending.initiatorPlayerId);
+        this.addLog(
+          state,
+          "skill",
+          `${initiator.name} 的起义仍在继续，等待 ${nextResponder.name} 决定是否跟随。`,
+          initiator.id,
+          nextResponder.id,
+        );
+        return;
+      }
+    }
   }
 
   private trimKnowledge(player: PlayerState): void {
@@ -826,6 +1105,9 @@ export class GameEngine {
     if (!actor.connected) {
       throw new GameError("PLAYER_OFFLINE", "离线玩家不能行动。");
     }
+    if (state.effects.pendingSlaveUprising) {
+      throw new GameError("PENDING_SLAVE_UPRISING", "当前正在等待奴隶起义的跟随响应。");
+    }
     if (payload.targetPlayerId) {
       throw new GameError("NOT_YOUR_TURN", "苏丹非自己回合只能公开身份，不能处决目标。");
     }
@@ -838,6 +1120,13 @@ export class GameEngine {
     }
     if (state.winner) {
       throw new GameError("GAME_FINISHED", "本局已经结束。");
+    }
+    if (state.effects.pendingSlaveUprising) {
+      const responder = state.players[state.effects.pendingSlaveUprising.currentResponderId];
+      throw new GameError(
+        "PENDING_SLAVE_UPRISING",
+        `当前正在等待 ${responder?.name ?? "指定玩家"} 决定是否跟随起义。`,
+      );
     }
     const currentId = this.currentPlayerId(state);
     if (currentId !== actorId) {
@@ -853,7 +1142,6 @@ export class GameEngine {
     if (!actor.connected) {
       throw new GameError("PLAYER_OFFLINE", "离线玩家不能行动。");
     }
-    this.addLog(state, "system", `${actor.name} 执行了动作：${actionNameZh(action)}`, actor.id);
   }
 
   private addLog(
@@ -942,6 +1230,9 @@ export class GameEngine {
 
   private finishActionAndAdvance(state: GameState): void {
     if (state.phase !== "in_game") {
+      return;
+    }
+    if (state.effects.pendingSlaveUprising) {
       return;
     }
     const immediate = this.checkWin(state);
@@ -1078,6 +1369,7 @@ export class GameEngine {
       scoreByPlayerId,
       endedAt: Date.now(),
     };
+    delete state.effects.pendingSlaveUprising;
     state.phase = "finished";
     this.addLog(state, "win", `${factionNameZh(win.winnerFaction)}获胜：${win.reason}`);
   }

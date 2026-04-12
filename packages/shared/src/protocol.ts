@@ -62,6 +62,10 @@ export interface ActionRevealSocketPayload extends ActionRevealPayload {
   roomId: string;
 }
 
+export interface DeclineFollowPayload {
+  roomId: string;
+}
+
 export interface SelectOraclePredictionPayload {
   roomId: string;
   prediction: WinFaction;
@@ -119,6 +123,10 @@ export interface ClientToServerEvents {
   ) => void;
   "action:reveal": (
     payload: ActionRevealSocketPayload,
+    ack: (result: AckResult<PlayerScopedState>) => void,
+  ) => void;
+  "action:declineFollow": (
+    payload: DeclineFollowPayload,
     ack: (result: AckResult<PlayerScopedState>) => void,
   ) => void;
   "state:resync": (
