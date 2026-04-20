@@ -84,22 +84,22 @@ const RULE_CARDS: Array<{ role: Role; title: string; desc: string }> = [
   {
     role: "assassin",
     title: "刺客（革命党）",
-    desc: "公开时刺杀一名玩家。若刺客或目标相邻位置存在有效守卫，则刺杀失败且刺客死亡。",
+    desc: "公开时刺杀一名玩家。刺客会先翻面；若被有效守卫拦截，则刺客死亡且拦截守卫翻面；若刺杀成功，则目标死亡并翻面。",
   },
   {
     role: "guard",
     title: "守卫（保皇派）",
-    desc: "公开时可拘留一名玩家。若目标不是苏丹或守卫，则目标跳过一次行动。刺客刺杀时可被动拦截。",
+    desc: "公开时可拘留一名玩家。若目标不是苏丹或守卫，则目标跳过一次行动。刺客刺杀时可被动拦截，并因拦截而翻面。",
   },
   {
     role: "slave",
     title: "奴隶（革命党）",
-    desc: "公开后可发动起义，相邻奴隶可跟随公开。若形成三张相邻公开奴隶，革命党立即获胜。",
+    desc: "公开后可发动起义。相邻奴隶依次决定是否跟随公开；连锁结束后由起义发起者手动结束回合。若形成三张相邻公开奴隶，革命党立即获胜。",
   },
   {
     role: "oracle",
     title: "占卜师（中立）",
-    desc: "公开后秘密查看三张牌并选择预言阵营。若该阵营最终获胜，占卜师获胜。",
+    desc: "公开后先选择三名玩家并查看其身份，再公开预言革命党或保皇派获胜。若预言正确，占卜师获胜。",
   },
   {
     role: "belly_dancer",
@@ -220,11 +220,14 @@ export function App() {
   const [privateFeed, setPrivateFeed] = useState<string[]>([]);
 
   const [selectedTarget, setSelectedTarget] = useState("");
+  const [oracleInspectPlayerIds, setOracleInspectPlayerIds] = useState<string[]>([]);
   const [noteEditorFor, setNoteEditorFor] = useState("");
   const [notesByPlayerId, setNotesByPlayerId] = useState<Record<string, NoteText>>({});
   const [forceSkillTarget, setForceSkillTarget] = useState("");
   const [oraclePrediction, setOraclePrediction] = useState<WinFaction>("rebels");
   const [forceOraclePrediction, setForceOraclePrediction] = useState<WinFaction>("rebels");
+  const [slaveTraderModalOpen, setSlaveTraderModalOpen] = useState(false);
+  const [slaveTraderLastResult, setSlaveTraderLastResult] = useState("");
   const [slaveTraderTargetsInput, setSlaveTraderTargetsInput] = useState("");
   const [forceSlaveTraderTargetsInput, setForceSlaveTraderTargetsInput] = useState("");
   const [showRuleModal, setShowRuleModal] = useState(false);
@@ -251,6 +254,9 @@ export function App() {
     });
     socket.on("game:private", (payload) => {
       setPrivateFeed((prev) => [payload.message, ...prev].slice(0, 40));
+      if (payload.message.includes("检查结果")) {
+        setSlaveTraderLastResult(payload.message);
+      }
     });
     socket.on("game:error", (payload) => {
       setErrors((prev) => [`${payload.code}: ${payload.message}`, ...prev].slice(0, 20));
@@ -302,9 +308,26 @@ export function App() {
   const currentActor = playersOrdered.find((player) => player.id === currentPlayerId);
   const myRole = privateState?.selfRole;
   const pendingAction = publicState?.pendingAction;
-  const pendingUprisingInitiator = playersOrdered.find((player) => player.id === pendingAction?.initiatorPlayerId);
-  const pendingUprisingResponder = playersOrdered.find((player) => player.id === pendingAction?.responderPlayerId);
-  const isMyPendingFollowTurn = pendingAction?.kind === "slave_uprising" && pendingAction.responderPlayerId === myPlayerId;
+  const pendingUprisingInitiator =
+    pendingAction && "initiatorPlayerId" in pendingAction
+      ? playersOrdered.find((player) => player.id === pendingAction.initiatorPlayerId)
+      : undefined;
+  const pendingUprisingResponder =
+    pendingAction?.kind === "slave_uprising_follow"
+      ? playersOrdered.find((player) => player.id === pendingAction.responderPlayerId)
+      : undefined;
+  const pendingOraclePlayer =
+    pendingAction?.kind === "oracle_prediction"
+      ? playersOrdered.find((player) => player.id === pendingAction.playerId)
+      : undefined;
+  const pendingSlaveTraderPlayer =
+    pendingAction?.kind === "slave_trader_pick"
+      ? playersOrdered.find((player) => player.id === pendingAction.playerId)
+      : undefined;
+  const isMyPendingFollowTurn = pendingAction?.kind === "slave_uprising_follow" && pendingAction.responderPlayerId === myPlayerId;
+  const isMySlaveEndTurn = pendingAction?.kind === "slave_uprising_end_turn" && pendingAction.initiatorPlayerId === myPlayerId;
+  const isMyOraclePredictionTurn = pendingAction?.kind === "oracle_prediction" && pendingAction.playerId === myPlayerId;
+  const isMySlaveTraderTurn = pendingAction?.kind === "slave_trader_pick" && pendingAction.playerId === myPlayerId;
 
   useEffect(() => {
     const actionableLogs =
@@ -482,7 +505,15 @@ export function App() {
       }
       return next;
     });
+    setOracleInspectPlayerIds((prev) => prev.filter((playerId) => publicState.players.some((player) => player.id === playerId)));
   }, [publicState]);
+
+  useEffect(() => {
+    setSlaveTraderModalOpen(isMySlaveTraderTurn);
+    if (!isMySlaveTraderTurn) {
+      setSlaveTraderLastResult("");
+    }
+  }, [isMySlaveTraderTurn]);
 
   function addError(message: string): void {
     setErrors((prev) => [message, ...prev].slice(0, 20));
@@ -504,6 +535,19 @@ export function App() {
         next[playerId] = note;
       }
       return next;
+    });
+  }
+
+  function toggleOracleInspectPlayer(playerId: string): void {
+    setOracleInspectPlayerIds((prev) => {
+      if (prev.includes(playerId)) {
+        return prev.filter((id) => id !== playerId);
+      }
+      if (prev.length >= 3) {
+        addError("占卜师一次必须恰好选择三名玩家。");
+        return prev;
+      }
+      return [...prev, playerId];
     });
   }
 
@@ -675,7 +719,14 @@ export function App() {
         payload.targetPlayerId = selectedTarget;
         break;
       case "oracle":
-        payload.oraclePrediction = oraclePrediction;
+        if (oracleInspectPlayerIds.length !== 3) {
+          addError("占卜师公开时必须选择三名玩家。");
+          return;
+        }
+        payload.inspectSubjects = oracleInspectPlayerIds.map((playerId) => ({
+          subjectType: "player" as const,
+          subjectId: playerId,
+        }));
         break;
       case "slave_trader":
         payload.slaveTraderTargets = slaveTraderTargets.length > 0 ? slaveTraderTargets : undefined;
@@ -698,6 +749,10 @@ export function App() {
       (result) => {
         if (!result.ok) {
           addError(`${result.error.code}: ${result.error.message}`);
+          return;
+        }
+        if (myRole === "oracle") {
+          setOracleInspectPlayerIds([]);
         }
       },
     );
@@ -715,6 +770,42 @@ export function App() {
     });
   }
 
+  function doOraclePrediction(): void {
+    const socket = socketRef.current;
+    if (!socket || !publicState) {
+      return;
+    }
+    socket.emit("action:oraclePrediction", { roomId: publicState.roomId, prediction: oraclePrediction }, (result) => {
+      if (!result.ok) {
+        addError(`${result.error.code}: ${result.error.message}`);
+      }
+    });
+  }
+
+  function doEndTurn(): void {
+    const socket = socketRef.current;
+    if (!socket || !publicState) {
+      return;
+    }
+    socket.emit("action:endTurn", { roomId: publicState.roomId }, (result) => {
+      if (!result.ok) {
+        addError(`${result.error.code}: ${result.error.message}`);
+      }
+    });
+  }
+
+  function doSlaveTraderPick(targetPlayerId: string): void {
+    const socket = socketRef.current;
+    if (!socket || !publicState) {
+      return;
+    }
+    socket.emit("action:slaveTraderPick", { roomId: publicState.roomId, targetPlayerId }, (result) => {
+      if (!result.ok) {
+        addError(`${result.error.code}: ${result.error.message}`);
+      }
+    });
+  }
+
   function leaveRoom(): void {
     const socket = socketRef.current;
     if (!socket || !publicState) {
@@ -724,6 +815,7 @@ export function App() {
       setScopedState(null);
       setMyPlayerId("");
       setSelectedTarget("");
+      setOracleInspectPlayerIds([]);
       setNoteEditorFor("");
       setActionFx(null);
       setActionFxQueue([]);
@@ -785,8 +877,12 @@ export function App() {
     !privateState?.selfCardFaceUp;
   const canFollowUprising =
     myRole === "slave" && !!me && me.alive && !privateState?.selfCardFaceUp && isMyPendingFollowTurn;
+  const canSubmitOraclePrediction = myRole === "oracle" && !!me?.alive && isMyOraclePredictionTurn;
+  const oracleRevealReady =
+    myRole !== "oracle" || !!privateState?.selfCardFaceUp || oracleInspectPlayerIds.length === 3;
   const revealNeedTarget = !canFollowUprising && roleNeedTarget(myRole);
-  const revealDisabled = canFollowUprising ? false : canAnytimeCrown ? false : actionDisabled || (revealNeedTarget && !selectedTarget);
+  const revealDisabled =
+    canFollowUprising ? false : canAnytimeCrown ? false : actionDisabled || !oracleRevealReady || (revealNeedTarget && !selectedTarget);
   const revealLabel =
     myRole === "sultan"
       ? privateState?.selfCardFaceUp
@@ -864,10 +960,18 @@ export function App() {
             <h2>圆桌显示区</h2>
             <p>点击头像可选目标并备注，当前行动玩家高亮</p>
           </div>
-          {pendingAction?.kind === "slave_uprising" ? (
+          {pendingAction?.kind === "slave_uprising_follow" ? (
             <div className="pending-banner">
               起义连锁中：{pendingUprisingInitiator?.name ?? "未知玩家"} 发起起义，正在等待
               {pendingUprisingResponder?.name ?? "下一位奴隶"} 选择跟随或放弃。
+            </div>
+          ) : pendingAction?.kind === "slave_uprising_end_turn" ? (
+            <div className="pending-banner">
+              起义待结束：{pendingUprisingInitiator?.name ?? "起义发起者"} 还可以观察局势，并在准备好后结束回合。
+            </div>
+          ) : pendingAction?.kind === "oracle_prediction" ? (
+            <div className="pending-banner">
+              占卜待公开：{pendingOraclePlayer?.name ?? "占卜师"} 已看完三名玩家身份，正在准备公开预言。
             </div>
           ) : null}
           {actionFx ? <div className={`action-fx-banner is-${actionFx.type}`}>{actionFx.message}</div> : null}
@@ -891,14 +995,16 @@ export function App() {
               const selected = player.id === selectedTarget;
               const isSelf = player.id === myPlayerId;
               const note = notesByPlayerId[player.id];
-              const showFront = player.alive && !!revealedRole;
+              const showFront = !!revealedRole;
               const showCrown = revealedRole === "sultan" && player.alive && publicState.phase === "in_game";
+              const publicPrediction = player.publicPrediction ? factionName(player.publicPrediction) : "";
+              const isDetained = player.alive && player.skipActions > 0;
 
               return (
                 <div key={player.id} className={`seat-wrap ${seatFxClass(player.id)}`.trim()} style={seatPosition(index, playersOrdered.length)}>
                   {showCrown ? <CrownMarker /> : null}
                   <button
-                    className={`seat-btn ${current ? "current" : ""} ${selected ? "selected" : ""} ${!player.alive ? "dead" : ""}`}
+                    className={`seat-btn ${current ? "current" : ""} ${selected ? "selected" : ""} ${!player.alive ? "dead" : ""} ${isDetained ? "detained" : ""}`}
                     onClick={() => openSeatOverlay(player.id)}
                   >
                     <div className={`seat-card ${showFront ? "front" : "back"}`}>
@@ -913,11 +1019,16 @@ export function App() {
                     <strong>
                       #{player.seatIndex + 1} {player.name}
                     </strong>
-                    <span>{isSelf ? "你" : "玩家"} · {showFront ? "正面" : player.alive ? "背面" : "阵亡背面"}</span>
+                    <span>
+                      {isSelf ? "你" : "玩家"} ·{" "}
+                      {showFront ? (player.alive ? "正面" : "阵亡正面") : player.alive ? "背面" : "阵亡背面"}
+                    </span>
                   </div>
                   {current ? <span className="seat-current-tag">行动中</span> : null}
                   {selected && !isSelf ? <span className="seat-target-tag">目标</span> : null}
                   {note ? <span className="seat-note-tag">{note}</span> : null}
+                  {isDetained ? <span className="seat-detained-tag">拘留 {player.skipActions}</span> : null}
+                  {publicPrediction ? <span className="seat-note-tag">预言：{publicPrediction}</span> : null}
                   {publicState.phase === "lobby" ? (
                     <span className={player.ready ? "seat-ready-tag" : "seat-unready-tag"}>
                       {player.ready ? "已准备" : "未准备"}
@@ -981,8 +1092,16 @@ export function App() {
               <p>
                 {isMyPendingFollowTurn
                   ? "当前需要你决定是否跟随起义。"
-                  : pendingAction?.kind === "slave_uprising"
+                  : isMySlaveEndTurn
+                    ? "起义连锁已经处理完，现在由你决定何时结束回合。"
+                    : isMyOraclePredictionTurn
+                      ? "你已经看完三名玩家身份，现在需要公开预言阵营。"
+                      : pendingAction?.kind === "slave_uprising_follow"
                     ? `正在等待 ${pendingUprisingResponder?.name ?? "指定玩家"} 响应起义。`
+                    : pendingAction?.kind === "slave_uprising_end_turn"
+                      ? `正在等待 ${pendingUprisingInitiator?.name ?? "起义发起者"} 结束回合。`
+                      : pendingAction?.kind === "oracle_prediction"
+                        ? `正在等待 ${pendingOraclePlayer?.name ?? "占卜师"} 公开预言。`
                     : isMyTurn
                       ? "现在轮到你行动。"
                       : "请等待其他玩家行动。"}
@@ -1070,15 +1189,49 @@ export function App() {
             ) : null}
             {!privacyMaskOn && myRole === "oracle" ? (
               <>
-                <label>预测阵营</label>
-                <select value={oraclePrediction} onChange={(e) => setOraclePrediction(e.target.value as WinFaction)}>
-                  <option value="rebels">革命党</option>
-                  <option value="loyalists">保皇派</option>
-                </select>
+                {!privateState?.selfCardFaceUp && !isMyOraclePredictionTurn ? (
+                  <>
+                    <label>选择三名玩家进行占卜</label>
+                    <div className="row">
+                      {targetPlayers.map((player) => {
+                        const chosen = oracleInspectPlayerIds.includes(player.id);
+                        return (
+                          <button
+                            key={`oracle-${player.id}`}
+                            className={chosen ? "btn-secondary" : "btn-outline"}
+                            onClick={() => toggleOracleInspectPlayer(player.id)}
+                          >
+                            #{player.seatIndex + 1} {player.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="tip">
+                      已选择 {oracleInspectPlayerIds.length}/3 名玩家：
+                      {oracleInspectPlayerIds.length === 0 ? " 暂无" : ` ${oracleInspectPlayerIds.map(describePlayerById).join("、")}`}
+                    </p>
+                  </>
+                ) : null}
+                {isMyOraclePredictionTurn ? (
+                  <>
+                    <label>公开预言阵营</label>
+                    <select value={oraclePrediction} onChange={(e) => setOraclePrediction(e.target.value as WinFaction)}>
+                      <option value="rebels">革命党</option>
+                      <option value="loyalists">保皇派</option>
+                    </select>
+                    <p className="tip">你的预言会公开给所有玩家，然后回合结束。</p>
+                  </>
+                ) : null}
               </>
             ) : null}
             {!privacyMaskOn && myRole === "slave" ? (
-              <p className="tip">{canFollowUprising ? "当前轮到你决定是否跟随起义。" : "你可在自己的回合发起起义。"}</p>
+              <p className="tip">
+                {canFollowUprising
+                  ? "当前轮到你决定是否跟随起义。"
+                  : isMySlaveEndTurn
+                    ? "你已经完成起义连锁，现在可以手动结束回合。"
+                    : "你可在自己的回合发起起义。"}
+              </p>
             ) : null}
             {!privacyMaskOn && myRole === "sultan" && privateState?.selfCardFaceUp ? (
               <p className="tip">你可以选择一个已公开的革命目标处决；如果不选目标，也可以直接结束回合。</p>
@@ -1129,11 +1282,23 @@ export function App() {
                 </div>
               </>
             ) : null}
-            {!privacyMaskOn && !canFollowUprising && roleNeedTarget(myRole) ? <p className="tip">该技能需要先选择目标。</p> : null}
+            {!privacyMaskOn && !canFollowUprising && !isMyOraclePredictionTurn && roleNeedTarget(myRole) ? <p className="tip">该技能需要先选择目标。</p> : null}
             <div className="row">
-              <button disabled={revealDisabled} className={myRole === "assassin" ? "skill-fire is-kill" : "skill-fire"} onClick={doReveal}>
-                {privacyMaskOn ? "执行身份技能" : revealLabel}
-              </button>
+              {!isMyOraclePredictionTurn && !isMySlaveEndTurn ? (
+                <button disabled={revealDisabled} className={myRole === "assassin" ? "skill-fire is-kill" : "skill-fire"} onClick={doReveal}>
+                  {privacyMaskOn ? "执行身份技能" : revealLabel}
+                </button>
+              ) : null}
+              {!privacyMaskOn && canSubmitOraclePrediction ? (
+                <button className="skill-fire" onClick={doOraclePrediction}>
+                  公开预言并结束回合
+                </button>
+              ) : null}
+              {!privacyMaskOn && isMySlaveEndTurn ? (
+                <button className="skill-fire" onClick={doEndTurn}>
+                  结束回合
+                </button>
+              ) : null}
               {!privacyMaskOn && canFollowUprising ? (
                 <button className="btn-outline" onClick={doDeclineFollow}>
                   放弃跟随

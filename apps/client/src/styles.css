@@ -948,6 +948,12 @@ button:disabled {
   filter: grayscale(0.24);
 }
 
+.seat-btn.detained {
+  box-shadow:
+    0 0 0 2px rgba(181, 142, 45, 0.24),
+    inset 0 0 0 2px rgba(181, 142, 45, 0.26);
+}
+
 .seat-card {
   width: 100%;
   height: 100%;
@@ -980,6 +986,7 @@ button:disabled {
 .seat-current-tag,
 .seat-target-tag,
 .seat-note-tag,
+.seat-detained-tag,
 .seat-ready-tag,
 .seat-unready-tag {
   margin-top: 4px;
@@ -1005,6 +1012,13 @@ button:disabled {
   color: #6b5a49;
   border-color: rgba(91, 70, 46, 0.35);
   background: rgba(255, 250, 240, 0.92);
+}
+
+.seat-detained-tag {
+  color: #7b5f1d;
+  border-color: rgba(181, 142, 45, 0.52);
+  background: rgba(255, 248, 225, 0.94);
+  animation: detainPulse 1.4s ease-in-out infinite;
 }
 
 .seat-ready-tag {

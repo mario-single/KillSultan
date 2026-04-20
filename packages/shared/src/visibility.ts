@@ -23,19 +23,36 @@ export function buildPublicState(state: GameState): PublicGameView {
         skipActions: player.skipActions,
         cardFaceUp: player.card.faceUp,
         revealedRole: player.card.faceUp ? player.card.role : undefined,
+        publicPrediction:
+          player.card.faceUp && player.card.role === "oracle" ? player.oraclePrediction : undefined,
       };
     }),
     seatOrder: [...state.seatOrder],
     centerCardCount: 1,
     turn: { ...state.turn },
     currentPlayerId: state.seatOrder[state.turn.currentSeatIndex],
-    pendingAction: state.effects.pendingSlaveUprising
+    pendingAction: state.effects.pendingOraclePrediction
       ? {
-          kind: "slave_uprising",
-          initiatorPlayerId: state.effects.pendingSlaveUprising.initiatorPlayerId,
-          responderPlayerId: state.effects.pendingSlaveUprising.currentResponderId,
+          kind: "oracle_prediction",
+          playerId: state.effects.pendingOraclePrediction.playerId,
         }
-      : undefined,
+      : state.effects.pendingSlaveTrader
+        ? {
+            kind: "slave_trader_pick",
+            playerId: state.effects.pendingSlaveTrader.playerId,
+          }
+      : state.effects.pendingSlaveUprising?.stage === "follow" && state.effects.pendingSlaveUprising.currentResponderId
+        ? {
+            kind: "slave_uprising_follow",
+            initiatorPlayerId: state.effects.pendingSlaveUprising.initiatorPlayerId,
+            responderPlayerId: state.effects.pendingSlaveUprising.currentResponderId,
+          }
+        : state.effects.pendingSlaveUprising?.stage === "await_end_turn"
+          ? {
+              kind: "slave_uprising_end_turn",
+              initiatorPlayerId: state.effects.pendingSlaveUprising.initiatorPlayerId,
+            }
+          : undefined,
     logs: state.logs.slice(-state.settings.revealLogLimit),
     winner: state.winner,
   };

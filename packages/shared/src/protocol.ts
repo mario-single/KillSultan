@@ -71,6 +71,15 @@ export interface SelectOraclePredictionPayload {
   prediction: WinFaction;
 }
 
+export interface EndTurnPayload {
+  roomId: string;
+}
+
+export interface SlaveTraderPickPayload {
+  roomId: string;
+  targetPlayerId: string;
+}
+
 export interface ResyncPayload {
   roomId: string;
   token: string;
@@ -127,6 +136,18 @@ export interface ClientToServerEvents {
   ) => void;
   "action:declineFollow": (
     payload: DeclineFollowPayload,
+    ack: (result: AckResult<PlayerScopedState>) => void,
+  ) => void;
+  "action:oraclePrediction": (
+    payload: SelectOraclePredictionPayload,
+    ack: (result: AckResult<PlayerScopedState>) => void,
+  ) => void;
+  "action:endTurn": (
+    payload: EndTurnPayload,
+    ack: (result: AckResult<PlayerScopedState>) => void,
+  ) => void;
+  "action:slaveTraderPick": (
+    payload: SlaveTraderPickPayload,
     ack: (result: AckResult<PlayerScopedState>) => void,
   ) => void;
   "state:resync": (

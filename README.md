@@ -84,6 +84,10 @@ npm run dev
   - 玩家规则手册的 DOCX 版本。
 - [docs/面向开发者文档.md](docs/面向开发者文档.md)
   - 给开发者看，说明宏观架构、实现方式与维护边界。
+- [docs/核心机制接口文档.md](docs/核心机制接口文档.md)
+  - 给开发者看，说明 `apps/core_rules` 与外围系统之间的接口约定。
+- `apps/core_rules/`
+  - 核心机制目录，默认由开发者 `zhz` 维护；除非 `lxh` 明确说明，否则不应随意改动。
 - [docs/AI交接记忆库.md](docs/AI交接记忆库.md)
   - 给 AI 看，用来保存上下文和协作约定。
 - [docs/lxhtodo.md](docs/lxhtodo.md)
@@ -95,12 +99,14 @@ npm run dev
 
 ```text
 apps/
-  server/   # 服务端（权威状态机 + Socket.io）
+  server/   # 服务端适配层（房间/Socket/广播）
+  core_rules/ # Python 核心机制层（默认由 zhz 维护）
   client/   # 前端（React + Vite）
 packages/
   shared/   # 前后端共享类型、规则与协议
 docs/
   面向开发者文档.md
+  核心机制接口文档.md
   AI交接记忆库.md
   quickstart-zh.md
   lxhtodo.md

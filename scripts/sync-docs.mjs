@@ -30,6 +30,10 @@ const mappings = [
     source: "docs/面向开发者文档.md",
     targets: ["apps/client/public/docs/面向开发者文档.md"],
   },
+  {
+    source: "docs/核心机制接口文档.md",
+    targets: ["apps/client/public/docs/核心机制接口文档.md"],
+  },
 ];
 
 function abs(rel) {

@@ -45,6 +45,12 @@ $mappings = @(
     Targets = @(
       "apps/client/public/docs/面向开发者文档.md"
     )
+  },
+  @{
+    Source = "docs/核心机制接口文档.md"
+    Targets = @(
+      "apps/client/public/docs/核心机制接口文档.md"
+    )
   }
 )
 

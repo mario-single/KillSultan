@@ -215,6 +215,48 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("action:oraclePrediction", async (payload, ack) => {
+    try {
+      const result = await engine.handleOraclePrediction(payload.roomId, socket.id, payload.prediction);
+      ack(ok(result.scopedState));
+      if (result.privateNotice) {
+        socket.emit("game:private", result.privateNotice);
+      }
+      await syncRoom(payload.roomId);
+    } catch (err) {
+      const mapped = mapError(err);
+      ack(fail(mapped.code, mapped.message));
+      socket.emit("game:error", mapped);
+    }
+  });
+
+  socket.on("action:endTurn", async (payload, ack) => {
+    try {
+      const result = await engine.handleEndTurn(payload.roomId, socket.id);
+      ack(ok(result.scopedState));
+      await syncRoom(payload.roomId);
+    } catch (err) {
+      const mapped = mapError(err);
+      ack(fail(mapped.code, mapped.message));
+      socket.emit("game:error", mapped);
+    }
+  });
+
+  socket.on("action:slaveTraderPick", async (payload, ack) => {
+    try {
+      const result = await engine.handleSlaveTraderPick(payload.roomId, socket.id, payload.targetPlayerId);
+      ack(ok(result.scopedState));
+      if (result.privateNotice) {
+        socket.emit("game:private", result.privateNotice);
+      }
+      await syncRoom(payload.roomId);
+    } catch (err) {
+      const mapped = mapError(err);
+      ack(fail(mapped.code, mapped.message));
+      socket.emit("game:error", mapped);
+    }
+  });
+
   socket.on("disconnect", async () => {
     const out = await engine.disconnectSocket(socket.id);
     if (out.roomId) {

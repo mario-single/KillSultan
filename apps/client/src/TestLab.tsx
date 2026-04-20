@@ -134,12 +134,13 @@ export function TestLab() {
       <div className="sim-grid">
         {slots.map((slot, index) => {
           const isHost = index === 0;
-          const playerLabel = isHost ? "房主" : `玩家${index + 1}`;
+          const playerNumber = index + 1;
+          const playerLabel = `玩家${playerNumber}`;
           const canRender = isHost || !!roomId;
           const src = isHost
             ? buildSimUrl({
                 slot,
-                name: "房主",
+                name: "玩家1",
                 mode: "create",
                 autoReady,
                 autoStart,
@@ -148,7 +149,7 @@ export function TestLab() {
             : canRender
               ? buildSimUrl({
                   slot,
-                  name: `玩家${index + 1}`,
+                  name: `玩家${playerNumber}`,
                   mode: "join",
                   roomId,
                   autoReady,
@@ -163,7 +164,7 @@ export function TestLab() {
                 <strong>
                   {playerLabel} · 槽位 {slot}
                 </strong>
-                <span>{isHost ? "自动建房" : roomId ? "自动加入" : "等待房间号"}</span>
+                <span>{isHost ? "1 号位 / 自动建房" : roomId ? `${playerNumber} 号位 / 自动加入` : "等待房间号"}</span>
               </header>
               {!running ? (
                 <div className="sim-wait">点击“启动 / 重启模拟”开始。</div>

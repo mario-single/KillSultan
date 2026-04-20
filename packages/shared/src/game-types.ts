@@ -89,9 +89,17 @@ export interface GameEffects {
   noSwapBackSequence?: number;
   pendingSlaveUprising?: {
     initiatorPlayerId: string;
-    currentResponderId: string;
+    stage: "follow" | "await_end_turn";
+    currentResponderId?: string;
     queue: string[];
     resolvedPlayerIds: string[];
+  };
+  pendingOraclePrediction?: {
+    playerId: string;
+  };
+  pendingSlaveTrader?: {
+    playerId: string;
+    checkedPlayerIds: string[];
   };
 }
 
@@ -129,6 +137,7 @@ export interface PublicPlayerView {
   skipActions: number;
   cardFaceUp: boolean;
   revealedRole?: Role;
+  publicPrediction?: WinFaction;
 }
 
 export interface PublicGameView {
@@ -141,11 +150,24 @@ export interface PublicGameView {
   centerCardCount: 1;
   turn: TurnState;
   currentPlayerId?: string;
-  pendingAction?: {
-    kind: "slave_uprising";
-    initiatorPlayerId: string;
-    responderPlayerId: string;
-  };
+  pendingAction?:
+    | {
+        kind: "slave_uprising_follow";
+        initiatorPlayerId: string;
+        responderPlayerId: string;
+      }
+    | {
+        kind: "slave_uprising_end_turn";
+        initiatorPlayerId: string;
+      }
+    | {
+        kind: "oracle_prediction";
+        playerId: string;
+      }
+    | {
+        kind: "slave_trader_pick";
+        playerId: string;
+      };
   logs: LogEntry[];
   winner?: WinResult;
 }
