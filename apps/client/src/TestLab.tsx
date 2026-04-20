@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 const MIN_PLAYERS = 5;
 const MAX_PLAYERS = 15;
 const HOST_SLOT = "lab_host";
+const JOIN_STAGGER_MS = 800;
 
 const STORAGE_KEYS = ["sultan_token", "sultan_room_id", "sultan_name"] as const;
 
@@ -52,6 +53,7 @@ export function TestLab() {
   const [bootId, setBootId] = useState(1);
   const [autoReady, setAutoReady] = useState(true);
   const [autoStart, setAutoStart] = useState(true);
+  const [releasedPlayerCount, setReleasedPlayerCount] = useState(1);
 
   const slots = useMemo(() => {
     const next: string[] = [HOST_SLOT];
@@ -65,6 +67,7 @@ export function TestLab() {
 
   useEffect(() => {
     if (!running) {
+      setReleasedPlayerCount(1);
       return;
     }
     const timer = window.setInterval(() => {
@@ -75,6 +78,27 @@ export function TestLab() {
     }, 500);
     return () => window.clearInterval(timer);
   }, [hostRoomStorageKey, roomId, running]);
+
+  useEffect(() => {
+    if (!running || !roomId) {
+      setReleasedPlayerCount(1);
+      return;
+    }
+
+    setReleasedPlayerCount(1);
+    const timers: number[] = [];
+    for (let playerNumber = 2; playerNumber <= simCount; playerNumber += 1) {
+      timers.push(
+        window.setTimeout(() => {
+          setReleasedPlayerCount((prev) => Math.max(prev, playerNumber));
+        }, JOIN_STAGGER_MS * (playerNumber - 1)),
+      );
+    }
+
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [bootId, roomId, running, simCount]);
 
   function clearSimulationStorage(): void {
     const allSlots: string[] = [HOST_SLOT];
@@ -101,7 +125,9 @@ export function TestLab() {
     <div className="lab-shell lab-shell-immersive">
       <h1>真实界面单机模拟器</h1>
       <p className="lab-subtitle">每个玩家窗口都在运行正式版页面（圆桌 + 面板），用于 5-15 人真实流程模拟。</p>
-      <p className="lab-status">当前房间：{roomId || "等待房主建房..."} | 当前玩家数：{simCount}</p>
+      <p className="lab-status">
+        当前房间：{roomId || "等待房主建房..."} | 当前玩家数：{simCount} | 模拟玩家会按顺序入场，尽量保证“玩家 X”对应 X 号位
+      </p>
 
       <div className="lab-toolbar">
         <label className="lab-checkbox">
@@ -136,7 +162,8 @@ export function TestLab() {
           const isHost = index === 0;
           const playerNumber = index + 1;
           const playerLabel = `玩家${playerNumber}`;
-          const canRender = isHost || !!roomId;
+          const released = isHost || playerNumber <= releasedPlayerCount;
+          const canRender = released && (isHost || !!roomId);
           const src = isHost
             ? buildSimUrl({
                 slot,
@@ -164,12 +191,20 @@ export function TestLab() {
                 <strong>
                   {playerLabel} · 槽位 {slot}
                 </strong>
-                <span>{isHost ? "1 号位 / 自动建房" : roomId ? `${playerNumber} 号位 / 自动加入` : "等待房间号"}</span>
+                <span>
+                  {isHost
+                    ? "1 号位 / 自动建房"
+                    : !roomId
+                      ? "等待房间号"
+                      : released
+                        ? `${playerNumber} 号位 / 自动加入`
+                        : `等待 ${playerNumber - 1} 号位先加入`}
+                </span>
               </header>
               {!running ? (
                 <div className="sim-wait">点击“启动 / 重启模拟”开始。</div>
               ) : !src ? (
-                <div className="sim-wait">等待房主创建房间...</div>
+                <div className="sim-wait">{roomId ? "正在按顺序安排玩家入场..." : "等待房主创建房间..."}</div>
               ) : (
                 <iframe className="sim-frame" src={src} title={`sim-${slot}`} />
               )}

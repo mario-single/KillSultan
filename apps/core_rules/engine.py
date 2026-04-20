@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import random
 import time
 from typing import Any
 
@@ -16,6 +17,9 @@ from helpers import (
     role_name_zh,
 )
 from setup import build_deck, create_card
+
+TURN_TIMEOUT_MS = 60_000
+UPRISING_RESPONSE_TIMEOUT_MS = 15_000
 
 
 class CoreRulesEngine:
@@ -52,6 +56,9 @@ class CoreRulesEngine:
         if command == "disconnect":
             self.handle_disconnect(state, request["playerId"])
             return {"state": state}
+        if command == "timeout":
+            self.handle_timeout(state)
+            return {"state": state}
 
         raise CoreRulesError("UNKNOWN_COMMAND", f"unsupported core rules command: {command}")
 
@@ -84,7 +91,9 @@ class CoreRulesEngine:
         state["turn"] = {"currentSeatIndex": 0, "round": 1, "sequence": 1}
         state["phase"] = "in_game"
         state["winner"] = None
-        state["effects"] = {}
+        state["effects"] = {
+            "turnDeadlineAt": int(time.time() * 1000) + TURN_TIMEOUT_MS,
+        }
         add_log(state, "system", "游戏开始，身份已发放。")
         add_log(state, "turn", f"第 {state['turn']['round']} 轮，轮到 {state['players'][self.current_player_id(state)]['name']} 行动。")
         mark_updated(state)
@@ -129,36 +138,36 @@ class CoreRulesEngine:
             raise CoreRulesError("TARGET_DEAD", "不能与已死亡玩家交换。")
         if target["id"] == actor["id"]:
             raise CoreRulesError("INVALID_TARGET", "不能与自己交换。")
-        if actor["card"]["faceUp"] or target["card"]["faceUp"]:
-            raise CoreRulesError("FACE_UP_FORBIDDEN", "任一方明牌时不能交换。")
+        if target["card"]["faceUp"]:
+            raise CoreRulesError("FACE_UP_FORBIDDEN", "不能交换明牌目标。")
+        self.assert_no_immediate_swap_back(state, actor["id"], target["id"])
 
         actor_card = dict(actor["card"])
-        actor["card"] = {**target["card"], "version": target["card"]["version"] + 1}
+        target_card = dict(target["card"])
+        actor["card"] = {**target_card, "version": target_card["version"] + 1}
         target["card"] = {**actor_card, "version": actor_card["version"] + 1}
-        add_log(state, "swap", f"{actor['name']} 与 {target['name']} 交换了暗牌。", actor["id"], target["id"])
+        effects = state.setdefault("effects", {})
+        effects["noSwapBackA"] = actor["id"]
+        effects["noSwapBackB"] = target["id"]
+        effects["noSwapBackSequence"] = self.next_turn_sequence_for_player(state, actor["id"], target["id"])
+        effects["noSwapBackProtectedVersion"] = actor["card"]["version"]
+        add_log(state, "swap", f"{actor['name']} 与 {target['name']} 交换了身份牌。", actor["id"], target["id"])
         self.finish_action_and_advance(state)
         mark_updated(state)
 
     def handle_swap_center(self, state: dict[str, Any], actor_id: str) -> None:
         self.assert_action_turn(state, actor_id)
         actor = self.get_player_or_throw(state, actor_id)
-        if actor["card"]["faceUp"]:
-            raise CoreRulesError("FACE_UP_FORBIDDEN", "明牌状态不能与中间牌交换。")
+        if state["centerCard"]["faceUp"]:
+            raise CoreRulesError("FACE_UP_FORBIDDEN", "不能与明牌状态的中间牌交换。")
         if not actor["alive"]:
             raise CoreRulesError("ACTOR_DEAD", "死亡玩家不能行动。")
 
         actor_card = dict(actor["card"])
-        actor["card"] = {
-            "role": state["centerCard"]["role"],
-            "faceUp": False,
-            "version": state["centerCard"]["version"] + 1,
-        }
-        state["centerCard"] = {
-            "role": actor_card["role"],
-            "faceUp": False,
-            "version": actor_card["version"] + 1,
-        }
-        add_log(state, "swap_center", f"{actor['name']} 与中间牌完成了交换。", actor["id"])
+        center_card = dict(state["centerCard"])
+        actor["card"] = {**center_card, "version": center_card["version"] + 1}
+        state["centerCard"] = {**actor_card, "version": actor_card["version"] + 1}
+        add_log(state, "swap_center", f"{actor['name']} 与中间牌交换了身份牌。", actor["id"])
         self.finish_action_and_advance(state)
         mark_updated(state)
 
@@ -166,7 +175,7 @@ class CoreRulesEngine:
         actor = self.get_player_or_throw(state, actor_id)
         pending_uprising = state.get("effects", {}).get("pendingSlaveUprising")
 
-        if pending_uprising and pending_uprising.get("stage") == "follow" and pending_uprising.get("currentResponderId") == actor_id:
+        if pending_uprising and pending_uprising.get("stage") == "follow" and actor_id in pending_uprising.get("waitingPlayerIds", []):
             return self.handle_slave_follow_reveal(state, actor, pending_uprising)
 
         is_sultan = actor["card"]["role"] == "sultan"
@@ -204,7 +213,7 @@ class CoreRulesEngine:
 
     def handle_decline_follow(self, state: dict[str, Any], actor_id: str) -> None:
         pending_uprising = state.get("effects", {}).get("pendingSlaveUprising")
-        if not pending_uprising or pending_uprising.get("currentResponderId") != actor_id:
+        if not pending_uprising or actor_id not in pending_uprising.get("waitingPlayerIds", []):
             raise CoreRulesError("NO_PENDING_FOLLOW", "当前没有等待你响应的起义跟随。")
         self.resolve_slave_uprising_response(state, actor_id, join_uprising=False)
         mark_updated(state)
@@ -220,7 +229,7 @@ class CoreRulesEngine:
         if (
             state["phase"] == "in_game"
             and not state.get("winner")
-            and state.get("effects", {}).get("pendingSlaveUprising", {}).get("currentResponderId") == player_id
+            and player_id in state.get("effects", {}).get("pendingSlaveUprising", {}).get("waitingPlayerIds", [])
         ):
             add_log(state, "skill", f"{player['name']} 当前离线，视为放弃跟随起义。", player["id"])
             self.resolve_slave_uprising_response(state, player_id, join_uprising=False)
@@ -405,9 +414,10 @@ class CoreRulesEngine:
             if guards:
                 actor["alive"] = False
                 self.reveal_player(state, actor)
-                for guard_id in guards:
-                    guard = self.get_player_or_throw(state, guard_id)
-                    self.reveal_player(state, guard, actor["id"])
+                guard_id = random.choice(guards)
+                guard = self.get_player_or_throw(state, guard_id)
+                self.reveal_player(state, guard, actor["id"])
+                add_log(state, "skill", f"{guard['name']} 拦截了 {actor['name']} 对 {target['name']} 的刺杀。", guard["id"], target["id"])
                 add_log(state, "death", f"刺杀失败：{actor['name']} 被守卫反制并死亡。", actor["id"])
             else:
                 target["alive"] = False
@@ -657,28 +667,24 @@ class CoreRulesEngine:
     def start_slave_uprising(self, state: dict[str, Any], initiator_player_id: str) -> None:
         initiator = self.get_player_or_throw(state, initiator_player_id)
         add_log(state, "skill", f"{initiator['name']} 发起了起义。", initiator["id"])
+        state.setdefault("effects", {}).pop("turnDeadlineAt", None)
 
         immediate = self.check_win(state)
         if immediate:
             self.apply_win(state, immediate)
             return
 
-        queue = self.collect_adjacent_slave_followers(state, initiator["id"], {initiator["id"]})
-        if not queue:
-            return
-
-        current_responder_id = queue.pop(0)
         state.setdefault("effects", {})["pendingSlaveUprising"] = {
             "initiatorPlayerId": initiator["id"],
             "stage": "follow",
-            "currentResponderId": current_responder_id,
-            "queue": queue,
+            "sourcePlayerId": initiator["id"],
+            "waitingPlayerIds": [],
+            "respondedPlayerIds": [],
+            "queue": [],
             "resolvedPlayerIds": [initiator["id"]],
+            "deadlineAt": int(time.time() * 1000) + UPRISING_RESPONSE_TIMEOUT_MS,
         }
-
-        responder = self.get_player_or_throw(state, current_responder_id)
-        add_log(state, "skill", f"{initiator['name']} 的起义正在扩散，等待 {responder['name']} 决定是否跟随。", initiator["id"], responder["id"])
-        self.advance_pending_slave_uprising_if_needed(state)
+        self.activate_next_uprising_source(state, initiator["id"], opened_by_player_id=initiator["id"])
 
     def resolve_slave_uprising_response(
         self,
@@ -688,89 +694,196 @@ class CoreRulesEngine:
         join_uprising: bool,
     ) -> None:
         pending = state.get("effects", {}).get("pendingSlaveUprising")
-        if not pending or pending.get("stage") != "follow" or pending["currentResponderId"] != responder_player_id:
+        if not pending or pending.get("stage") != "follow" or responder_player_id not in pending.get("waitingPlayerIds", []):
             raise CoreRulesError("NO_PENDING_FOLLOW", "当前没有等待该玩家响应的起义跟随。")
 
-        initiator = self.get_player_or_throw(state, pending["initiatorPlayerId"])
+        source = self.get_player_or_throw(state, pending["sourcePlayerId"])
         responder = self.get_player_or_throw(state, responder_player_id)
+        if responder_player_id in pending["respondedPlayerIds"]:
+            raise CoreRulesError("FOLLOW_ALREADY_RESOLVED", "你已经对这次起义响应过了。")
+
+        pending["respondedPlayerIds"].append(responder_player_id)
         if responder_player_id not in pending["resolvedPlayerIds"]:
             pending["resolvedPlayerIds"].append(responder_player_id)
 
         if join_uprising:
-            add_log(state, "skill", f"{responder['name']} 跟随了 {initiator['name']} 发起的起义。", responder["id"], initiator["id"])
+            add_log(state, "skill", f"{responder['name']} 跟随了 {source['name']} 发起的起义。", responder["id"], source["id"])
             immediate = self.check_win(state)
             if immediate:
                 self.apply_win(state, immediate)
                 return
-            excluded = set(pending["resolvedPlayerIds"]) | set(pending["queue"])
-            pending["queue"].extend(self.collect_adjacent_slave_followers(state, responder["id"], excluded))
+            if responder["id"] not in pending["queue"]:
+                pending["queue"].append(responder["id"])
         else:
-            add_log(state, "skill", f"{responder['name']} 放弃了跟随 {initiator['name']} 发起的起义。", responder["id"], initiator["id"])
+            add_log(state, "skill", f"{responder['name']} 放弃了跟随 {source['name']} 发起的起义。", responder["id"], source["id"])
 
         self.advance_pending_slave_uprising_if_needed(state)
 
-    def collect_adjacent_slave_followers(
+    def collect_adjacent_uprising_candidates(
         self,
         state: dict[str, Any],
         source_player_id: str,
         excluded: set[str],
     ) -> list[str]:
-        followers: list[str] = []
+        candidates: list[str] = []
         for candidate_id in self.adjacent_players(state, source_player_id):
             if candidate_id in excluded:
                 continue
             candidate = state["players"].get(candidate_id)
-            if candidate and candidate["alive"] and not candidate["card"]["faceUp"] and candidate["card"]["role"] == "slave":
-                followers.append(candidate_id)
-        return followers
+            if candidate and candidate["alive"] and not candidate["card"]["faceUp"]:
+                candidates.append(candidate_id)
+        return candidates
+
+    def activate_next_uprising_source(
+        self,
+        state: dict[str, Any],
+        source_player_id: str,
+        *,
+        opened_by_player_id: str,
+    ) -> None:
+        pending = state.get("effects", {}).get("pendingSlaveUprising")
+        if not pending:
+            return
+
+        excluded = set(pending["resolvedPlayerIds"])
+        waiting_player_ids = self.collect_adjacent_uprising_candidates(state, source_player_id, excluded)
+
+        if not waiting_player_ids:
+            self.advance_pending_slave_uprising_if_needed(state)
+            return
+
+        pending["sourcePlayerId"] = source_player_id
+        pending["waitingPlayerIds"] = waiting_player_ids
+        pending["respondedPlayerIds"] = []
+        pending["deadlineAt"] = int(time.time() * 1000) + UPRISING_RESPONSE_TIMEOUT_MS
+
+        source = self.get_player_or_throw(state, source_player_id)
+        add_log(state, "skill", f"等待 {source['name']} 两侧玩家选择是否跟随起义。", opened_by_player_id, source["id"])
 
     def advance_pending_slave_uprising_if_needed(self, state: dict[str, Any]) -> None:
         pending = state.get("effects", {}).get("pendingSlaveUprising")
         if not pending or state.get("winner") or state["phase"] != "in_game":
             return
-        if pending.get("stage") == "await_end_turn":
+        if pending.get("waitingPlayerIds") and len(pending.get("respondedPlayerIds", [])) < len(pending["waitingPlayerIds"]):
             return
 
-        while True:
-            responder = state["players"].get(pending["currentResponderId"])
-            if responder and responder["alive"] and not responder["card"]["faceUp"] and responder["card"]["role"] == "slave" and responder["connected"]:
+        pending["waitingPlayerIds"] = []
+        pending["respondedPlayerIds"] = []
+
+        while pending["queue"]:
+            next_source_id = pending["queue"].pop(0)
+            next_source = state["players"].get(next_source_id)
+            if not next_source or not next_source["alive"] or not next_source["card"]["faceUp"] or next_source["card"]["role"] != "slave":
+                continue
+            self.activate_next_uprising_source(state, next_source_id, opened_by_player_id=next_source_id)
+            if pending.get("waitingPlayerIds"):
                 return
 
-            if responder and responder["id"] not in pending["resolvedPlayerIds"]:
-                pending["resolvedPlayerIds"].append(responder["id"])
-                if not responder["connected"]:
-                    add_log(state, "skill", f"{responder['name']} 当前离线，视为放弃跟随起义。", responder["id"], pending["initiatorPlayerId"])
+        initiator = self.get_player_or_throw(state, pending["initiatorPlayerId"])
+        state["effects"].pop("pendingSlaveUprising", None)
+        add_log(state, "turn", f"{initiator['name']} 发起的起义连锁结束，本回合自动结束。", initiator["id"])
+        self.finish_action_and_advance(state)
 
-            if not pending["queue"]:
-                pending["stage"] = "await_end_turn"
-                pending.pop("currentResponderId", None)
-                initiator = self.get_player_or_throw(state, pending["initiatorPlayerId"])
-                add_log(state, "skill", f"{initiator['name']} 可以选择结束本回合。", initiator["id"])
-                return
+    def handle_timeout(self, state: dict[str, Any]) -> None:
+        if state["phase"] != "in_game" or state.get("winner"):
+            return
 
-            pending["currentResponderId"] = pending["queue"].pop(0)
-            next_responder = state["players"].get(pending["currentResponderId"])
-            if next_responder and next_responder["alive"] and not next_responder["card"]["faceUp"] and next_responder["card"]["role"] == "slave" and next_responder["connected"]:
-                initiator = self.get_player_or_throw(state, pending["initiatorPlayerId"])
-                add_log(
-                    state,
-                    "skill",
-                    f"{initiator['name']} 的起义仍在继续，等待 {next_responder['name']} 决定是否跟随。",
-                    initiator["id"],
-                    next_responder["id"],
-                )
+        pending_uprising = state.get("effects", {}).get("pendingSlaveUprising")
+        if pending_uprising and pending_uprising.get("stage") == "follow":
+            self.resolve_slave_uprising_timeout(state, pending_uprising)
+            mark_updated(state)
+            return
+
+        pending_oracle = state.get("effects", {}).get("pendingOraclePrediction")
+        if pending_oracle:
+            actor = self.get_player_or_throw(state, pending_oracle["playerId"])
+            state["effects"].pop("pendingOraclePrediction", None)
+            add_log(state, "skill", f"{actor['name']} 超时未公开预言，本回合自动结束。", actor["id"])
+            self.finish_action_and_advance(state)
+            mark_updated(state)
+            return
+
+        pending_slave_trader = state.get("effects", {}).get("pendingSlaveTrader")
+        if pending_slave_trader:
+            actor = self.get_player_or_throw(state, pending_slave_trader["playerId"])
+            state["effects"].pop("pendingSlaveTrader", None)
+            add_log(state, "skill", f"{actor['name']} 超时未完成奴隶贩子筛查，技能自动结束。", actor["id"])
+            self.finish_action_and_advance(state)
+            mark_updated(state)
+            return
+
+        actor = self.get_player_or_throw(state, self.current_player_id(state))
+        add_log(state, "turn", f"{actor['name']} 超时未行动，本回合自动结束。", actor["id"])
+        self.finish_action_and_advance(state)
+        mark_updated(state)
+
+    def resolve_slave_uprising_timeout(self, state: dict[str, Any], pending_uprising: dict[str, Any]) -> None:
+        waiting_ids = [
+            player_id
+            for player_id in pending_uprising.get("waitingPlayerIds", [])
+            if player_id not in pending_uprising.get("respondedPlayerIds", [])
+        ]
+        for player_id in waiting_ids:
+            if state.get("winner"):
                 return
+            player = self.get_player_or_throw(state, player_id)
+            should_follow = (
+                player["alive"]
+                and player["connected"]
+                and not player["card"]["faceUp"]
+                and player["card"]["role"] == "slave"
+            )
+            add_log(
+                state,
+                "skill",
+                f"{player['name']} 超时未响应，系统默认{ '跟随' if should_follow else '放弃' }起义。",
+                player["id"],
+                pending_uprising["sourcePlayerId"],
+            )
+            if should_follow:
+                self.reveal_player(state, player, pending_uprising["sourcePlayerId"])
+            self.resolve_slave_uprising_response(state, player_id, join_uprising=should_follow)
 
     def trim_knowledge(self, player: dict[str, Any]) -> None:
         knowledge = player.get("privateKnowledge", [])
         if len(knowledge) > 30:
             player["privateKnowledge"] = knowledge[-30:]
 
+    def assert_no_immediate_swap_back(self, state: dict[str, Any], actor_id: str, target_player_id: str) -> None:
+        effects = state.get("effects", {})
+        protected_player_id = effects.get("noSwapBackA")
+        restricted_player_id = effects.get("noSwapBackB")
+        restricted_sequence = effects.get("noSwapBackSequence")
+        protected_version = effects.get("noSwapBackProtectedVersion")
+
+        if (
+            protected_player_id != target_player_id
+            or restricted_player_id != actor_id
+            or restricted_sequence != state["turn"]["sequence"]
+            or protected_version is None
+        ):
+            return
+
+        protected_player = state["players"].get(protected_player_id)
+        if not protected_player:
+            return
+        if protected_player["card"]["version"] != protected_version:
+            return
+
+        raise CoreRulesError("NO_IMMEDIATE_SWAP_BACK", "刚完成交换的两名玩家不能立刻换回去。")
+
     def get_player_or_throw(self, state: dict[str, Any], player_id: str) -> dict[str, Any]:
         player = state["players"].get(player_id)
         if not player:
             raise CoreRulesError("PLAYER_NOT_FOUND", "玩家不存在。")
         return player
+
+    def next_turn_sequence_for_player(self, state: dict[str, Any], from_player_id: str, to_player_id: str) -> int:
+        seat_count = len(state["seatOrder"])
+        from_seat = state["players"][from_player_id]["seatIndex"]
+        to_seat = state["players"][to_player_id]["seatIndex"]
+        distance = (to_seat - from_seat + seat_count) % seat_count
+        return state["turn"]["sequence"] + distance
 
     def current_player_id(self, state: dict[str, Any]) -> str:
         return current_player_id(state)
@@ -795,6 +908,8 @@ class CoreRulesEngine:
             raise CoreRulesError("PENDING_SLAVE_UPRISING", "当前正在等待奴隶起义的跟随响应。")
         if state.get("effects", {}).get("pendingOraclePrediction"):
             raise CoreRulesError("PENDING_ORACLE_PREDICTION", "当前正在等待占卜师公开预言。")
+        if state.get("effects", {}).get("pendingSlaveTrader"):
+            raise CoreRulesError("PENDING_SLAVE_TRADER", "当前正在等待奴隶贩子完成筛查。")
         if payload.get("targetPlayerId"):
             raise CoreRulesError("NOT_YOUR_TURN", "苏丹非自己回合只能公开身份，不能处决目标。")
         return True
@@ -806,18 +921,22 @@ class CoreRulesEngine:
             raise CoreRulesError("GAME_FINISHED", "本局已经结束。")
         if state.get("effects", {}).get("pendingSlaveUprising"):
             pending = state["effects"]["pendingSlaveUprising"]
-            if pending.get("stage") == "follow":
-                responder = state["players"].get(pending.get("currentResponderId"))
-                raise CoreRulesError(
-                    "PENDING_SLAVE_UPRISING",
-                    f"当前正在等待 {responder['name'] if responder else '指定玩家'} 决定是否跟随起义。",
-                )
-            raise CoreRulesError("PENDING_SLAVE_UPRISING", "当前正在等待起义发起者结束本回合。")
+            source = state["players"].get(pending.get("sourcePlayerId"))
+            raise CoreRulesError(
+                "PENDING_SLAVE_UPRISING",
+                f"当前正在等待 {source['name'] if source else '当前登台玩家'} 两侧玩家决定是否跟随起义。",
+            )
         if state.get("effects", {}).get("pendingOraclePrediction"):
             oracle_player = state["players"].get(state["effects"]["pendingOraclePrediction"]["playerId"])
             raise CoreRulesError(
                 "PENDING_ORACLE_PREDICTION",
                 f"当前正在等待 {oracle_player['name'] if oracle_player else '占卜师'} 公开预言。",
+            )
+        if state.get("effects", {}).get("pendingSlaveTrader"):
+            trader_player = state["players"].get(state["effects"]["pendingSlaveTrader"]["playerId"])
+            raise CoreRulesError(
+                "PENDING_SLAVE_TRADER",
+                f"当前正在等待 {trader_player['name'] if trader_player else '奴隶贩子'} 继续筛查。",
             )
         if self.current_player_id(state) != actor_id:
             raise CoreRulesError("NOT_YOUR_TURN", f"还没轮到你行动，当前应由 {self.current_player_id(state)} 行动。")
@@ -844,6 +963,8 @@ class CoreRulesEngine:
             return
         if state.get("effects", {}).get("pendingOraclePrediction"):
             return
+        if state.get("effects", {}).get("pendingSlaveTrader"):
+            return
 
         immediate = self.check_win(state)
         if immediate:
@@ -860,6 +981,7 @@ class CoreRulesEngine:
 
         current = state["players"][self.current_player_id(state)]
         add_log(state, "turn", f"第 {state['turn']['round']} 轮，轮到 {current['name']} 行动。")
+        state.setdefault("effects", {})["turnDeadlineAt"] = int(time.time() * 1000) + TURN_TIMEOUT_MS
 
     def consume_skipped_turns(self, state: dict[str, Any]) -> None:
         for _ in range(len(state["seatOrder"])):
@@ -959,7 +1081,10 @@ class CoreRulesEngine:
             "scoreByPlayerId": score_by_player_id,
             "endedAt": int(time.time() * 1000),
         }
+        state.setdefault("effects", {}).pop("turnDeadlineAt", None)
         state.setdefault("effects", {}).pop("pendingSlaveUprising", None)
+        state.setdefault("effects", {}).pop("pendingOraclePrediction", None)
+        state.setdefault("effects", {}).pop("pendingSlaveTrader", None)
         state["phase"] = "finished"
         add_log(state, "win", f"{faction_name_zh(win['winnerFaction'])}获胜：{win['reason']}")
 
@@ -1002,8 +1127,6 @@ class CoreRulesEngine:
         return guards
 
     def pick_default_oracle_subjects(self, state: dict[str, Any], oracle_id: str) -> list[dict[str, Any]]:
-        import random
-
         pool: list[dict[str, Any]] = [
             {"subjectType": "player", "subjectId": player_id}
             for player_id in state["seatOrder"]

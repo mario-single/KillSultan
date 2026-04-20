@@ -592,6 +592,12 @@ button:disabled {
   padding: 16px;
 }
 
+.settlement-mask.stage-impact {
+  background:
+    radial-gradient(circle at 50% 24%, rgba(181, 142, 45, 0.24), transparent 32%),
+    rgba(22, 16, 12, 0.72);
+}
+
 .settlement-modal {
   width: min(540px, 100%);
   border-radius: 16px;
@@ -599,10 +605,33 @@ button:disabled {
   background: rgba(255, 251, 242, 0.98);
   box-shadow: var(--shadow);
   padding: 16px;
+  position: relative;
+  overflow: hidden;
 }
 
 .settlement-modal h3 {
   margin: 0 0 8px;
+}
+
+.settlement-modal.stage-impact {
+  text-align: center;
+  padding-top: 22px;
+  padding-bottom: 22px;
+  animation: stageStartFlash 0.5s ease;
+}
+
+.settlement-modal.stage-showdown {
+  border-color: rgba(181, 142, 45, 0.4);
+  background:
+    radial-gradient(circle at 85% 14%, rgba(181, 142, 45, 0.12), transparent 34%),
+    rgba(255, 251, 242, 0.98);
+}
+
+.settlement-modal.stage-continue {
+  border-color: rgba(47, 122, 97, 0.38);
+  background:
+    radial-gradient(circle at 82% 16%, rgba(47, 122, 97, 0.12), transparent 34%),
+    rgba(250, 255, 252, 0.98);
 }
 
 .settlement-win {
@@ -616,9 +645,54 @@ button:disabled {
   color: var(--muted);
 }
 
+.settlement-callout {
+  margin: 10px 0 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(61, 47, 32, 0.14);
+  background: rgba(255, 255, 255, 0.74);
+  padding: 10px 12px;
+  color: var(--ink);
+}
+
+.settlement-actions {
+  margin-bottom: 10px;
+}
+
+.settlement-burst {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.settlement-burst::before,
+.settlement-burst::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 42%;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  animation: settlementBurst 1.4s ease-out infinite;
+}
+
+.settlement-burst::before {
+  width: 180px;
+  height: 180px;
+  background: radial-gradient(circle, rgba(181, 142, 45, 0.26) 0%, rgba(181, 142, 45, 0.12) 38%, transparent 72%);
+}
+
+.settlement-burst::after {
+  width: 250px;
+  height: 250px;
+  border: 1px solid rgba(181, 142, 45, 0.32);
+  animation-delay: 0.18s;
+}
+
 .settlement-scoreboard {
   margin: 8px 0 12px;
   border-top: 1px dashed rgba(66, 50, 34, 0.26);
+  max-height: min(40vh, 300px);
+  overflow: auto;
 }
 
 .settlement-row {
@@ -836,6 +910,8 @@ button:disabled {
   aspect-ratio: 1 / 1;
   margin-left: auto;
   margin-right: auto;
+  overflow: hidden;
+  isolation: isolate;
 }
 
 .round-table.fx-peek,
@@ -855,6 +931,146 @@ button:disabled {
   animation: stageWinFlash 1.6s ease;
 }
 
+.table-fx-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  --fx-rgb: 177, 69, 44;
+}
+
+.table-fx-layer.tone-peek {
+  --fx-rgb: 47, 122, 97;
+}
+
+.table-fx-layer.tone-swap,
+.table-fx-layer.tone-swap-center {
+  --fx-rgb: 177, 69, 44;
+}
+
+.table-fx-layer.tone-reveal,
+.table-fx-layer.tone-skill {
+  --fx-rgb: 181, 142, 45;
+}
+
+.table-fx-layer.tone-detain {
+  --fx-rgb: 181, 142, 45;
+}
+
+.table-fx-layer.tone-death {
+  --fx-rgb: 168, 53, 48;
+}
+
+.table-fx-layer.tone-win {
+  --fx-rgb: 47, 122, 97;
+}
+
+.table-fx-layer.tone-win::before {
+  content: "";
+  position: absolute;
+  inset: 18%;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(var(--fx-rgb), 0.34) 0%, rgba(var(--fx-rgb), 0.12) 40%, transparent 76%);
+  animation: fxWinHalo 1.45s ease-out both;
+}
+
+.table-fx-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.table-fx-beam {
+  fill: none;
+  stroke: rgba(var(--fx-rgb), 0.86);
+  stroke-width: 0.85;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 8px rgba(var(--fx-rgb), 0.34));
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  animation: fxBeamTrace 0.92s cubic-bezier(0.2, 0.68, 0.18, 1) forwards;
+}
+
+.table-fx-layer.tone-peek .table-fx-beam {
+  stroke-width: 0.72;
+  stroke-dasharray: 16 10 48 26;
+  animation: fxPeekBeam 0.95s ease-out forwards;
+}
+
+.table-fx-beam.is-alt {
+  opacity: 0.72;
+  animation-delay: 0.08s;
+}
+
+.table-fx-node {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: rgba(var(--fx-rgb), 0.24);
+  border: 1px solid rgba(var(--fx-rgb), 0.72);
+  box-shadow:
+    0 0 0 0 rgba(var(--fx-rgb), 0.22),
+    0 0 18px rgba(var(--fx-rgb), 0.24);
+  animation: fxNodePop 0.86s ease-out both;
+}
+
+.table-fx-node::before,
+.table-fx-node::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  border-radius: inherit;
+  border: 1px solid rgba(var(--fx-rgb), 0.42);
+  animation: fxRingOut 0.96s ease-out both;
+}
+
+.table-fx-node::after {
+  inset: -16px;
+  opacity: 0.78;
+  animation-delay: 0.1s;
+}
+
+.table-fx-node.is-target {
+  width: 22px;
+  height: 22px;
+  background: rgba(255, 255, 255, 0.92);
+  border-width: 2px;
+}
+
+.table-fx-node.is-center {
+  width: 30px;
+  height: 30px;
+  border-style: dashed;
+  background: rgba(var(--fx-rgb), 0.16);
+}
+
+.table-fx-bloom {
+  position: absolute;
+  width: 82px;
+  height: 82px;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(var(--fx-rgb), 0.38) 0%, rgba(var(--fx-rgb), 0.18) 28%, transparent 72%);
+  filter: blur(1px);
+  animation: fxBloomPulse 0.95s ease-out both;
+}
+
+.table-fx-crown-burst {
+  position: absolute;
+  inset: 12%;
+  border-radius: 999px;
+  background: repeating-conic-gradient(
+    from -12deg,
+    rgba(var(--fx-rgb), 0) 0deg 10deg,
+    rgba(var(--fx-rgb), 0.18) 10deg 18deg
+  );
+  mix-blend-mode: screen;
+  animation: fxCrownBurst 1.55s ease-out both;
+}
+
 .table-center {
   position: absolute;
   left: 50%;
@@ -868,6 +1084,7 @@ button:disabled {
   display: grid;
   place-content: center;
   text-align: center;
+  z-index: 2;
 }
 
 .table-center p {
@@ -882,6 +1099,7 @@ button:disabled {
   width: 132px;
   display: grid;
   justify-items: center;
+  z-index: 4;
 }
 
 .seat-wrap.fx-peek-source .seat-btn,
@@ -1481,6 +1699,125 @@ button:disabled {
   }
 }
 
+@keyframes fxBeamTrace {
+  0% {
+    opacity: 0;
+    stroke-dashoffset: 100;
+  }
+  18% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.34;
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes fxPeekBeam {
+  0% {
+    opacity: 0;
+    stroke-dashoffset: 44;
+  }
+  24% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.42;
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes fxNodePop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.45);
+    box-shadow:
+      0 0 0 0 rgba(var(--fx-rgb), 0),
+      0 0 0 rgba(var(--fx-rgb), 0);
+  }
+  40% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.08);
+    box-shadow:
+      0 0 0 10px rgba(var(--fx-rgb), 0.16),
+      0 0 20px rgba(var(--fx-rgb), 0.32);
+  }
+  100% {
+    opacity: 0.96;
+    transform: translate(-50%, -50%) scale(1);
+    box-shadow:
+      0 0 0 14px rgba(var(--fx-rgb), 0),
+      0 0 10px rgba(var(--fx-rgb), 0.16);
+  }
+}
+
+@keyframes fxRingOut {
+  0% {
+    opacity: 0.64;
+    transform: scale(0.68);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.28);
+  }
+}
+
+@keyframes fxBloomPulse {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.4);
+  }
+  30% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.45);
+  }
+}
+
+@keyframes fxCrownBurst {
+  0% {
+    opacity: 0;
+    transform: scale(0.72) rotate(-8deg);
+  }
+  35% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.22) rotate(14deg);
+  }
+}
+
+@keyframes fxWinHalo {
+  0% {
+    opacity: 0;
+    transform: scale(0.76);
+  }
+  28% {
+    opacity: 0.92;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.2);
+  }
+}
+
+@keyframes settlementBurst {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.55);
+  }
+  30% {
+    opacity: 0.92;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.18);
+  }
+}
+
 @keyframes stageStartFlash {
   0% {
     transform: scale(0.98);
@@ -1602,6 +1939,11 @@ button:disabled {
 
   .round-table {
     width: min(96vw, 520px);
+  }
+
+  .table-fx-bloom {
+    width: 64px;
+    height: 64px;
   }
 
   .seat-wrap {

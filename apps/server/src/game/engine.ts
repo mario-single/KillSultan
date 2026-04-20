@@ -42,6 +42,7 @@ export class GameEngine {
   private readonly rooms = new Map<string, ActiveRoom>();
   private readonly socketIndex = new Map<string, { roomId: string; playerId: string }>();
   private readonly coreRules = new CoreRulesBridge();
+  private readonly deadlineTimerByRoomId = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(private readonly stateStore: StateStore) {}
 
@@ -163,7 +164,7 @@ export class GameEngine {
     const playerId = this.resolvePlayerId(room, socketId);
     const player = this.getPlayerOrThrow(room.state, playerId);
 
-    if (room.state.phase === "lobby") {
+    if (room.state.phase !== "in_game") {
       delete room.state.players[playerId];
       room.state.seatOrder = room.state.seatOrder.filter((id) => id !== playerId);
       room.state.seatOrder.forEach((id, index) => {
@@ -177,6 +178,7 @@ export class GameEngine {
 
       if (room.state.seatOrder.length === 0) {
         this.rooms.delete(roomId);
+        this.clearDeadlineTimer(roomId);
         await this.stateStore.delete(roomId);
         return {
           roomId,
@@ -189,6 +191,10 @@ export class GameEngine {
           turn: { currentSeatIndex: 0, round: 1, sequence: 1 },
           logs: [],
         };
+      }
+
+      if (room.state.phase === "finished") {
+        await this.maybeAutoStartRematch(room);
       }
     } else {
       room.state = (await this.coreRules.disconnect(room.state, playerId)).state;
@@ -203,11 +209,25 @@ export class GameEngine {
   async setReady(roomId: string, socketId: string, ready: boolean): Promise<PublicGameView> {
     const room = await this.getRoomOrThrow(roomId);
     const playerId = this.resolvePlayerId(room, socketId);
-    if (room.state.phase !== "lobby") {
-      throw new GameError("GAME_ALREADY_STARTED", "游戏开始后不能再切换准备状态。");
+
+    if (room.state.phase === "in_game") {
+      throw new GameError("GAME_ALREADY_STARTED", "游戏进行中不能切换准备状态。");
     }
+
     room.state.players[playerId].ready = ready;
-    this.addLog(room.state, "system", `${room.state.players[playerId].name} ${ready ? "已准备" : "取消准备"}`);
+    this.addLog(
+      room.state,
+      "system",
+      `${room.state.players[playerId].name} ${
+        room.state.phase === "finished" ? (ready ? "选择继续下一局" : "暂不继续") : ready ? "已准备" : "取消准备"
+      }`,
+      playerId,
+    );
+
+    if (room.state.phase === "finished") {
+      await this.maybeAutoStartRematch(room);
+    }
+
     this.markUpdated(room.state);
     await this.persist(room);
     return buildPublicState(room.state);
@@ -229,8 +249,10 @@ export class GameEngine {
   ): Promise<EngineMutationResult> {
     const room = await this.getRoomOrThrow(roomId);
     const actorId = this.resolvePlayerId(room, socketId);
+    const previousPhase = room.state.phase;
     const result = await this.coreRules.actionPeek(room.state, actorId, targetPlayerId);
     room.state = result.state;
+    this.handleFinishedTransition(room.state, previousPhase);
     this.markUpdated(room.state);
     await this.persist(room);
     return {
@@ -247,8 +269,10 @@ export class GameEngine {
   ): Promise<EngineMutationResult> {
     const room = await this.getRoomOrThrow(roomId);
     const actorId = this.resolvePlayerId(room, socketId);
+    const previousPhase = room.state.phase;
     const result = await this.coreRules.actionSwap(room.state, actorId, targetPlayerId);
     room.state = result.state;
+    this.handleFinishedTransition(room.state, previousPhase);
     this.markUpdated(room.state);
     await this.persist(room);
     return {
@@ -261,8 +285,10 @@ export class GameEngine {
   async handlePlayerSwapWithCenter(roomId: string, socketId: string): Promise<EngineMutationResult> {
     const room = await this.getRoomOrThrow(roomId);
     const actorId = this.resolvePlayerId(room, socketId);
+    const previousPhase = room.state.phase;
     const result = await this.coreRules.actionSwapCenter(room.state, actorId);
     room.state = result.state;
+    this.handleFinishedTransition(room.state, previousPhase);
     this.markUpdated(room.state);
     await this.persist(room);
     return {
@@ -279,8 +305,10 @@ export class GameEngine {
   ): Promise<EngineMutationResult> {
     const room = await this.getRoomOrThrow(roomId);
     const actorId = this.resolvePlayerId(room, socketId);
+    const previousPhase = room.state.phase;
     const result = await this.coreRules.actionReveal(room.state, actorId, payload);
     room.state = result.state;
+    this.handleFinishedTransition(room.state, previousPhase);
     this.markUpdated(room.state);
     await this.persist(room);
     return {
@@ -293,8 +321,10 @@ export class GameEngine {
   async handleDeclineSlaveUprisingFollow(roomId: string, socketId: string): Promise<EngineMutationResult> {
     const room = await this.getRoomOrThrow(roomId);
     const actorId = this.resolvePlayerId(room, socketId);
+    const previousPhase = room.state.phase;
     const result = await this.coreRules.actionDeclineFollow(room.state, actorId);
     room.state = result.state;
+    this.handleFinishedTransition(room.state, previousPhase);
     this.markUpdated(room.state);
     await this.persist(room);
     return {
@@ -311,8 +341,10 @@ export class GameEngine {
   ): Promise<EngineMutationResult> {
     const room = await this.getRoomOrThrow(roomId);
     const actorId = this.resolvePlayerId(room, socketId);
+    const previousPhase = room.state.phase;
     const result = await this.coreRules.actionOraclePrediction(room.state, actorId, prediction);
     room.state = result.state;
+    this.handleFinishedTransition(room.state, previousPhase);
     this.markUpdated(room.state);
     await this.persist(room);
     return {
@@ -325,8 +357,10 @@ export class GameEngine {
   async handleEndTurn(roomId: string, socketId: string): Promise<EngineMutationResult> {
     const room = await this.getRoomOrThrow(roomId);
     const actorId = this.resolvePlayerId(room, socketId);
+    const previousPhase = room.state.phase;
     const result = await this.coreRules.actionEndTurn(room.state, actorId);
     room.state = result.state;
+    this.handleFinishedTransition(room.state, previousPhase);
     this.markUpdated(room.state);
     await this.persist(room);
     return {
@@ -343,8 +377,10 @@ export class GameEngine {
   ): Promise<EngineMutationResult> {
     const room = await this.getRoomOrThrow(roomId);
     const actorId = this.resolvePlayerId(room, socketId);
+    const previousPhase = room.state.phase;
     const result = await this.coreRules.actionSlaveTraderPick(room.state, actorId, targetPlayerId);
     room.state = result.state;
+    this.handleFinishedTransition(room.state, previousPhase);
     this.markUpdated(room.state);
     await this.persist(room);
     return {
@@ -366,7 +402,9 @@ export class GameEngine {
     }
 
     if (room.state.phase === "in_game") {
+      const previousPhase = room.state.phase;
       room.state = (await this.coreRules.disconnect(room.state, location.playerId)).state;
+      this.handleFinishedTransition(room.state, previousPhase);
       this.markUpdated(room.state);
       await this.persist(room);
     } else {
@@ -430,6 +468,7 @@ export class GameEngine {
       playerBySocketId: new Map(),
     };
     this.rooms.set(roomId, room);
+    this.scheduleDeadline(room);
     return room;
   }
 
@@ -519,7 +558,112 @@ export class GameEngine {
     state.updatedAt = Date.now();
   }
 
+  private clearDeadlineTimer(roomId: string): void {
+    const timer = this.deadlineTimerByRoomId.get(roomId);
+    if (timer) {
+      clearTimeout(timer);
+      this.deadlineTimerByRoomId.delete(roomId);
+    }
+  }
+
+  private nextDeadlineAt(state: GameState): number | undefined {
+    const uprisingDeadline = state.effects.pendingSlaveUprising?.deadlineAt;
+    const turnDeadline = state.effects.turnDeadlineAt;
+    if (uprisingDeadline && turnDeadline) {
+      return Math.min(uprisingDeadline, turnDeadline);
+    }
+    return uprisingDeadline ?? turnDeadline;
+  }
+
+  private scheduleDeadline(room: ActiveRoom): void {
+    this.clearDeadlineTimer(room.state.roomId);
+    if (room.state.phase !== "in_game" || room.state.winner) {
+      return;
+    }
+
+    const deadlineAt = this.nextDeadlineAt(room.state);
+    if (!deadlineAt) {
+      return;
+    }
+
+    const delayMs = Math.max(0, deadlineAt - Date.now());
+    const timer = setTimeout(() => {
+      void this.handleDeadline(room.state.roomId).catch(() => undefined);
+    }, delayMs);
+    this.deadlineTimerByRoomId.set(room.state.roomId, timer);
+  }
+
+  private async handleDeadline(roomId: string): Promise<void> {
+    const room = await this.getRoomOrThrow(roomId);
+    if (room.state.phase !== "in_game" || room.state.winner) {
+      this.clearDeadlineTimer(roomId);
+      return;
+    }
+
+    const deadlineAt = this.nextDeadlineAt(room.state);
+    if (!deadlineAt) {
+      this.clearDeadlineTimer(roomId);
+      return;
+    }
+
+    if (deadlineAt > Date.now()) {
+      this.scheduleDeadline(room);
+      return;
+    }
+
+    const previousPhase = room.state.phase;
+    const result = await this.coreRules.timeout(room.state);
+    room.state = result.state;
+    this.handleFinishedTransition(room.state, previousPhase);
+    this.markUpdated(room.state);
+    await this.persist(room);
+  }
+
+  private handleFinishedTransition(state: GameState, previousPhase: GameState["phase"]): void {
+    if (previousPhase === "finished" || state.phase !== "finished") {
+      return;
+    }
+    state.seatOrder.forEach((playerId) => {
+      state.players[playerId].ready = false;
+    });
+  }
+
+  private async maybeAutoStartRematch(room: ActiveRoom): Promise<void> {
+    if (room.state.phase !== "finished") {
+      return;
+    }
+    if (room.state.seatOrder.length < room.state.settings.minPlayers) {
+      return;
+    }
+    if (!room.state.seatOrder.every((playerId) => room.state.players[playerId]?.ready)) {
+      return;
+    }
+
+    this.prepareStateForRematch(room.state);
+    room.state = (await this.coreRules.startGame(room.state, room.state.hostPlayerId)).state;
+  }
+
+  private prepareStateForRematch(state: GameState): void {
+    state.phase = "lobby";
+    state.winner = undefined;
+    state.effects = {};
+    state.logs = [];
+    state.turn = { currentSeatIndex: 0, round: 1, sequence: 1 };
+    state.centerCard = createCard("guard", 0);
+
+    state.seatOrder.forEach((playerId) => {
+      const player = state.players[playerId];
+      player.ready = true;
+      player.alive = true;
+      player.skipActions = 0;
+      player.oraclePrediction = undefined;
+      player.privateKnowledge = [];
+      player.card = createCard("oracle", 0);
+    });
+  }
+
   private async persist(room: ActiveRoom): Promise<void> {
     await this.stateStore.save(room.state);
+    this.scheduleDeadline(room);
   }
 }

@@ -23,14 +23,18 @@ export function buildPublicState(state: GameState): PublicGameView {
         skipActions: player.skipActions,
         cardFaceUp: player.card.faceUp,
         revealedRole: player.card.faceUp ? player.card.role : undefined,
+        finalRole: state.phase === "finished" ? player.card.role : undefined,
         publicPrediction:
-          player.card.faceUp && player.card.role === "oracle" ? player.oraclePrediction : undefined,
+          (player.card.faceUp || state.phase === "finished") && player.card.role === "oracle"
+            ? player.oraclePrediction
+            : undefined,
       };
     }),
     seatOrder: [...state.seatOrder],
     centerCardCount: 1,
     turn: { ...state.turn },
     currentPlayerId: state.seatOrder[state.turn.currentSeatIndex],
+    turnDeadlineAt: state.effects.turnDeadlineAt,
     pendingAction: state.effects.pendingOraclePrediction
       ? {
           kind: "oracle_prediction",
@@ -41,18 +45,15 @@ export function buildPublicState(state: GameState): PublicGameView {
             kind: "slave_trader_pick",
             playerId: state.effects.pendingSlaveTrader.playerId,
           }
-      : state.effects.pendingSlaveUprising?.stage === "follow" && state.effects.pendingSlaveUprising.currentResponderId
+      : state.effects.pendingSlaveUprising?.stage === "follow" && state.effects.pendingSlaveUprising.waitingPlayerIds.length > 0
         ? {
             kind: "slave_uprising_follow",
             initiatorPlayerId: state.effects.pendingSlaveUprising.initiatorPlayerId,
-            responderPlayerId: state.effects.pendingSlaveUprising.currentResponderId,
+            sourcePlayerId: state.effects.pendingSlaveUprising.sourcePlayerId,
+            responderPlayerIds: [...state.effects.pendingSlaveUprising.waitingPlayerIds],
+            deadlineAt: state.effects.pendingSlaveUprising.deadlineAt,
           }
-        : state.effects.pendingSlaveUprising?.stage === "await_end_turn"
-          ? {
-              kind: "slave_uprising_end_turn",
-              initiatorPlayerId: state.effects.pendingSlaveUprising.initiatorPlayerId,
-            }
-          : undefined,
+        : undefined,
     logs: state.logs.slice(-state.settings.revealLogLimit),
     winner: state.winner,
   };

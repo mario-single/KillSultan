@@ -37,6 +37,11 @@ const NAME_KEY = `${BASE_NAME_KEY}${KEY_SUFFIX}`;
 
 const NOTE_OPTIONS = ["", "疑似苏丹", "疑似刺客", "疑似守卫", "疑似奴隶", "重点观察"] as const;
 type NoteText = (typeof NOTE_OPTIONS)[number];
+type PostgameStage = "impact" | "showdown" | "continue";
+
+const ENDGAME_IMPACT_MS = 2200;
+const ENDGAME_REVEAL_MS = 4000;
+const ENDGAME_PROMPT_MS = ENDGAME_IMPACT_MS + ENDGAME_REVEAL_MS;
 
 type ClientSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 type ActionFx = {
@@ -84,7 +89,7 @@ const RULE_CARDS: Array<{ role: Role; title: string; desc: string }> = [
   {
     role: "assassin",
     title: "刺客（革命党）",
-    desc: "公开时刺杀一名玩家。刺客会先翻面；若被有效守卫拦截，则刺客死亡且拦截守卫翻面；若刺杀成功，则目标死亡并翻面。",
+    desc: "公开时刺杀一名玩家。刺客会先翻面；若有有效守卫拦截，则随机由其中一名守卫翻面并挡下刺杀；若刺杀成功，则目标死亡并翻面。",
   },
   {
     role: "guard",
@@ -94,7 +99,7 @@ const RULE_CARDS: Array<{ role: Role; title: string; desc: string }> = [
   {
     role: "slave",
     title: "奴隶（革命党）",
-    desc: "公开后可发动起义。相邻奴隶依次决定是否跟随公开；连锁结束后由起义发起者手动结束回合。若形成三张相邻公开奴隶，革命党立即获胜。",
+    desc: "公开后可发动起义。当前登台奴隶两侧玩家同时决定是否跟随；真奴隶可跟随或拒绝，其他身份只能拒绝。15 秒未响应时，奴隶默认跟随，其他身份默认拒绝。",
   },
   {
     role: "oracle",
@@ -119,7 +124,11 @@ const RULE_CARDS: Array<{ role: Role; title: string; desc: string }> = [
 ];
 
 const RULE_BASE: Array<{ title: string; desc: string; icon: RuleGlyphKind }> = [
-  { title: "每回合动作", desc: "每位玩家每回合只能执行 1 个动作：偷看 / 交换 / 换中间牌 / 公开。", icon: "turn" },
+  {
+    title: "每回合动作",
+    desc: "每位玩家每回合只能执行 1 个动作：偷看 / 交换 / 换中间牌 / 公开。目标不能是明牌，但你自己的明牌可以换出去；普通回合倒计时 60 秒。",
+    icon: "turn",
+  },
   { title: "阵营摇摆", desc: "阵营由当前持牌决定，暗牌交换后阵营立即变化。", icon: "faction" },
   {
     title: "胜利条件",
@@ -172,13 +181,38 @@ function areAdjacentSeats(a: number, b: number, total: number): boolean {
   return diff === 1 || diff === total - 1;
 }
 
-function seatPosition(index: number, total: number): { left: string; top: string } {
+function seatVector(index: number, total: number): { x: number; y: number } {
   const angle = -Math.PI / 2 + (2 * Math.PI * index) / Math.max(total, 1);
   const radius = total <= 6 ? 34 : total <= 10 ? 39 : 42;
   return {
-    left: `${50 + Math.cos(angle) * radius}%`,
-    top: `${50 + Math.sin(angle) * radius}%`,
+    x: 50 + Math.cos(angle) * radius,
+    y: 50 + Math.sin(angle) * radius,
   };
+}
+
+function seatPosition(index: number, total: number): { left: string; top: string } {
+  const { x, y } = seatVector(index, total);
+  return {
+    left: `${x}%`,
+    top: `${y}%`,
+  };
+}
+
+function buildFxBeamPath(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  curve = 0,
+): string {
+  const midX = (from.x + to.x) / 2;
+  const midY = (from.y + to.y) / 2;
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const length = Math.hypot(dx, dy) || 1;
+  const normalX = -dy / length;
+  const normalY = dx / length;
+  const controlX = midX + normalX * curve;
+  const controlY = midY + normalY * curve;
+  return `M ${from.x} ${from.y} Q ${controlX} ${controlY} ${to.x} ${to.y}`;
 }
 
 function roleNeedTarget(role?: Role): boolean {
@@ -236,6 +270,7 @@ export function App() {
   const [autoJoinRetryNonce, setAutoJoinRetryNonce] = useState(0);
   const [actionFx, setActionFx] = useState<ActionFx | null>(null);
   const [actionFxQueue, setActionFxQueue] = useState<ActionFx[]>([]);
+  const [postgameNow, setPostgameNow] = useState(() => Date.now());
   const autoCreateDoneRef = useRef(false);
   const autoJoinDoneRef = useRef(false);
   const autoJoinCooldownUntilRef = useRef(0);
@@ -243,6 +278,7 @@ export function App() {
   const autoReadyCooldownUntilRef = useRef(0);
   const autoStartCooldownUntilRef = useRef(0);
   const lastAnimatedLogIdRef = useRef("");
+  const lastWinnerEndedAtRef = useRef<number | null>(null);
 
   useEffect(() => {
     const socket: ClientSocket = io(SERVER_URL, { transports: ["websocket"] });
@@ -263,6 +299,14 @@ export function App() {
     });
     socket.on("game:over", (nextState) => {
       setScopedState(nextState);
+      const endedAt = nextState.publicState.winner?.endedAt ?? null;
+      if (endedAt && lastWinnerEndedAtRef.current === endedAt) {
+        return;
+      }
+      if (endedAt) {
+        lastWinnerEndedAtRef.current = endedAt;
+        setPostgameNow(Date.now());
+      }
       setPrivateFeed((prev) => ["本局已结束。", ...prev].slice(0, 40));
     });
     socket.on("connect", () => {
@@ -294,6 +338,7 @@ export function App() {
 
   const publicState = scopedState?.publicState;
   const privateState = scopedState?.privateState;
+  const winner = publicState?.winner;
   const currentPlayerId = publicState?.currentPlayerId;
   const playersOrdered = useMemo(() => {
     if (!publicState) {
@@ -314,7 +359,7 @@ export function App() {
       : undefined;
   const pendingUprisingResponder =
     pendingAction?.kind === "slave_uprising_follow"
-      ? playersOrdered.find((player) => player.id === pendingAction.responderPlayerId)
+      ? playersOrdered.find((player) => player.id === pendingAction.sourcePlayerId)
       : undefined;
   const pendingOraclePlayer =
     pendingAction?.kind === "oracle_prediction"
@@ -324,10 +369,43 @@ export function App() {
     pendingAction?.kind === "slave_trader_pick"
       ? playersOrdered.find((player) => player.id === pendingAction.playerId)
       : undefined;
-  const isMyPendingFollowTurn = pendingAction?.kind === "slave_uprising_follow" && pendingAction.responderPlayerId === myPlayerId;
-  const isMySlaveEndTurn = pendingAction?.kind === "slave_uprising_end_turn" && pendingAction.initiatorPlayerId === myPlayerId;
+  const isMyPendingFollowTurn =
+    pendingAction?.kind === "slave_uprising_follow" && pendingAction.responderPlayerIds.includes(myPlayerId);
   const isMyOraclePredictionTurn = pendingAction?.kind === "oracle_prediction" && pendingAction.playerId === myPlayerId;
   const isMySlaveTraderTurn = pendingAction?.kind === "slave_trader_pick" && pendingAction.playerId === myPlayerId;
+  const canFollowUprising =
+    pendingAction?.kind === "slave_uprising_follow" &&
+    pendingAction.responderPlayerIds.includes(myPlayerId) &&
+    myRole === "slave" &&
+    !!me &&
+    me.alive &&
+    !privateState?.selfCardFaceUp;
+  const currentCountdownEndsAt =
+    pendingAction?.kind === "slave_uprising_follow" ? pendingAction.deadlineAt : publicState?.turnDeadlineAt;
+  const currentCountdownSeconds = currentCountdownEndsAt ? Math.max(0, Math.ceil((currentCountdownEndsAt - postgameNow) / 1000)) : 0;
+  const currentCountdownLabel =
+    pendingAction?.kind === "slave_uprising_follow"
+      ? "跟随倒计时"
+      : pendingAction?.kind === "oracle_prediction"
+        ? "预言倒计时"
+        : pendingAction?.kind === "slave_trader_pick"
+          ? "筛查倒计时"
+          : publicState?.phase === "in_game"
+            ? "回合倒计时"
+            : "";
+  const postgameElapsedMs =
+    publicState?.phase === "finished" && winner ? Math.max(0, postgameNow - winner.endedAt) : 0;
+  const postgameStage: PostgameStage | null =
+    publicState?.phase !== "finished" || !winner
+      ? null
+      : postgameElapsedMs < ENDGAME_IMPACT_MS
+        ? "impact"
+        : postgameElapsedMs < ENDGAME_PROMPT_MS
+          ? "showdown"
+          : "continue";
+  const postgameRevealOpen = postgameStage === "showdown" || postgameStage === "continue";
+  const postgameRevealCountdown =
+    postgameStage === "showdown" ? Math.max(1, Math.ceil((ENDGAME_PROMPT_MS - postgameElapsedMs) / 1000)) : 0;
 
   useEffect(() => {
     const actionableLogs =
@@ -376,6 +454,15 @@ export function App() {
 
     return () => window.clearTimeout(timer);
   }, [actionFx, actionFxQueue]);
+
+  useEffect(() => {
+    if (!publicState) {
+      return;
+    }
+    setPostgameNow(Date.now());
+    const timer = window.setInterval(() => setPostgameNow(Date.now()), 250);
+    return () => window.clearInterval(timer);
+  }, [publicState?.phase, winner?.endedAt, currentCountdownEndsAt]);
 
   useEffect(() => {
     if (!SIM_AUTO_MODE || publicState) {
@@ -445,27 +532,60 @@ export function App() {
   }, [autoJoinRetryNonce, publicState, socketConnected, token]);
 
   useEffect(() => {
-    if (!publicState || !me || !socketRef.current || publicState.phase !== "lobby") {
+    if (!publicState || !me || !socketRef.current) {
       return;
     }
 
     const socket = socketRef.current;
 
-    if (SIM_AUTO_READY && !me.ready && Date.now() >= autoReadyCooldownUntilRef.current) {
+    if (publicState.phase === "lobby") {
+      if (SIM_AUTO_READY && !me.ready && Date.now() >= autoReadyCooldownUntilRef.current) {
+        autoReadyCooldownUntilRef.current = Date.now() + 600;
+        socket.emit("room:ready", { roomId: publicState.roomId, ready: true }, () => undefined);
+      }
+
+      if (SIM_AUTO_START && publicState.hostPlayerId === myPlayerId && Date.now() >= autoStartCooldownUntilRef.current) {
+        const canStart = publicState.players.length >= 5 && publicState.players.every((player) => player.ready);
+        if (canStart) {
+          autoStartCooldownUntilRef.current = Date.now() + 1200;
+          socket.emit("game:start", { roomId: publicState.roomId }, () => undefined);
+        }
+      }
+
+      return;
+    }
+
+    if (
+      publicState.phase === "finished" &&
+      SIM_AUTO_READY &&
+      !me.ready &&
+      winner &&
+      postgameNow >= winner.endedAt + ENDGAME_PROMPT_MS &&
+      Date.now() >= autoReadyCooldownUntilRef.current
+    ) {
       autoReadyCooldownUntilRef.current = Date.now() + 600;
       socket.emit("room:ready", { roomId: publicState.roomId, ready: true }, () => undefined);
     }
-
-    if (SIM_AUTO_START && publicState.hostPlayerId === myPlayerId && Date.now() >= autoStartCooldownUntilRef.current) {
-      const canStart = publicState.players.length >= 5 && publicState.players.every((player) => player.ready);
-      if (canStart) {
-        autoStartCooldownUntilRef.current = Date.now() + 1200;
-        socket.emit("game:start", { roomId: publicState.roomId }, () => undefined);
-      }
-    }
-  }, [me, myPlayerId, publicState]);
+  }, [me, myPlayerId, postgameNow, publicState, winner]);
 
   const noteStorageKey = publicState && myPlayerId ? `killsultan_notes_${publicState.roomId}_${myPlayerId}` : "";
+
+  useEffect(() => {
+    if (winner?.endedAt) {
+      lastWinnerEndedAtRef.current = winner.endedAt;
+    }
+  }, [winner?.endedAt]);
+
+  useEffect(() => {
+    if (publicState?.phase === "in_game") {
+      setActionFx(null);
+      setActionFxQueue([]);
+      setPostgameNow(Date.now());
+    }
+  }, [publicState?.phase, winner?.endedAt]);
+
+  const postgameContinueVotes = publicState?.phase === "finished" ? publicState.players.filter((player) => player.ready).length : 0;
+  const hasConfirmedContinue = publicState?.phase === "finished" ? Boolean(me?.ready) : false;
 
   useEffect(() => {
     if (!noteStorageKey) {
@@ -517,6 +637,18 @@ export function App() {
 
   function addError(message: string): void {
     setErrors((prev) => [message, ...prev].slice(0, 20));
+  }
+
+  function setContinueVote(ready: boolean): void {
+    const socket = socketRef.current;
+    if (!socket || !publicState || publicState.phase !== "finished") {
+      return;
+    }
+    socket.emit("room:ready", { roomId: publicState.roomId, ready }, (result) => {
+      if (!result.ok) {
+        addError(`${result.error.code}: ${result.error.message}`);
+      }
+    });
   }
 
   function openSeatOverlay(playerId: string): void {
@@ -822,7 +954,9 @@ export function App() {
       setForceSkillTarget("");
       setSlaveTraderTargetsInput("");
       setForceSlaveTraderTargetsInput("");
+      setPostgameNow(Date.now());
       lastAnimatedLogIdRef.current = "";
+      lastWinnerEndedAtRef.current = null;
       localStorage.removeItem(ROOM_KEY);
     });
   }
@@ -875,8 +1009,6 @@ export function App() {
     !pendingAction &&
     !!me?.alive &&
     !privateState?.selfCardFaceUp;
-  const canFollowUprising =
-    myRole === "slave" && !!me && me.alive && !privateState?.selfCardFaceUp && isMyPendingFollowTurn;
   const canSubmitOraclePrediction = myRole === "oracle" && !!me?.alive && isMyOraclePredictionTurn;
   const oracleRevealReady =
     myRole !== "oracle" || !!privateState?.selfCardFaceUp || oracleInspectPlayerIds.length === 3;
@@ -898,7 +1030,45 @@ export function App() {
     }
     return `#${target.seatIndex + 1} ${target.name}`;
   };
-  const tableFxClass = actionFx ? `fx-${actionFx.type.replace("_", "-")}` : "";
+  const actionFxToken = actionFx ? actionFx.type.replaceAll("_", "-") : "";
+  const tableFxClass = actionFxToken ? `fx-${actionFxToken}` : "";
+  const actionFxActor = actionFx?.actorId
+    ? playersOrdered.find((player) => player.id === actionFx.actorId)
+    : undefined;
+  const actionFxTarget = actionFx?.targetId
+    ? playersOrdered.find((player) => player.id === actionFx.targetId)
+    : undefined;
+  const actionFxActorPoint =
+    actionFxActor && playersOrdered.length > 0
+      ? seatVector(actionFxActor.seatIndex, playersOrdered.length)
+      : undefined;
+  const actionFxTargetPoint =
+    actionFxTarget && playersOrdered.length > 0
+      ? seatVector(actionFxTarget.seatIndex, playersOrdered.length)
+      : undefined;
+  const centerPoint = { x: 50, y: 50 };
+  const primaryBeamPath =
+    !actionFx || !actionFxActorPoint
+      ? undefined
+      : actionFx.type === "peek"
+        ? actionFxTargetPoint
+          ? buildFxBeamPath(actionFxActorPoint, actionFxTargetPoint, 5)
+          : undefined
+        : actionFx.type === "swap"
+          ? actionFxTargetPoint
+            ? buildFxBeamPath(actionFxActorPoint, actionFxTargetPoint, 8)
+            : undefined
+          : actionFx.type === "swap_center"
+            ? buildFxBeamPath(actionFxActorPoint, centerPoint, -8)
+            : actionFx.type === "detain" || actionFx.type === "death" || actionFx.type === "skill"
+              ? actionFxTargetPoint
+                ? buildFxBeamPath(actionFxActorPoint, actionFxTargetPoint, 4)
+                : buildFxBeamPath(actionFxActorPoint, centerPoint, 2)
+              : undefined;
+  const secondaryBeamPath =
+    actionFx?.type === "swap" && actionFxActorPoint && actionFxTargetPoint
+      ? buildFxBeamPath(actionFxActorPoint, actionFxTargetPoint, -8)
+      : undefined;
   const seatFxClass = (playerId: string): string => {
     if (!actionFx) {
       return "";
@@ -962,16 +1132,18 @@ export function App() {
           </div>
           {pendingAction?.kind === "slave_uprising_follow" ? (
             <div className="pending-banner">
-              起义连锁中：{pendingUprisingInitiator?.name ?? "未知玩家"} 发起起义，正在等待
-              {pendingUprisingResponder?.name ?? "下一位奴隶"} 选择跟随或放弃。
-            </div>
-          ) : pendingAction?.kind === "slave_uprising_end_turn" ? (
-            <div className="pending-banner">
-              起义待结束：{pendingUprisingInitiator?.name ?? "起义发起者"} 还可以观察局势，并在准备好后结束回合。
+              起义连锁中：正在等待 {pendingUprisingResponder?.name ?? "当前登台奴隶"} 两侧玩家选择是否跟随。
+              {currentCountdownEndsAt ? ` 剩余 ${currentCountdownSeconds} 秒。` : ""}
             </div>
           ) : pendingAction?.kind === "oracle_prediction" ? (
             <div className="pending-banner">
               占卜待公开：{pendingOraclePlayer?.name ?? "占卜师"} 已看完三名玩家身份，正在准备公开预言。
+              {currentCountdownEndsAt ? ` 剩余 ${currentCountdownSeconds} 秒。` : ""}
+            </div>
+          ) : pendingAction?.kind === "slave_trader_pick" ? (
+            <div className="pending-banner">
+              筛查待继续：{pendingSlaveTraderPlayer?.name ?? "奴隶贩子"} 需要继续选择检查目标。
+              {currentCountdownEndsAt ? ` 剩余 ${currentCountdownSeconds} 秒。` : ""}
             </div>
           ) : null}
           {actionFx ? <div className={`action-fx-banner is-${actionFx.type}`}>{actionFx.message}</div> : null}
@@ -985,18 +1157,57 @@ export function App() {
             </div>
           ) : null}
           <div className={`round-table ${tableFxClass}`.trim()}>
+            {actionFx ? (
+              <div className={`table-fx-layer tone-${actionFxToken}`}>
+                <svg className="table-fx-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                  {primaryBeamPath ? <path className="table-fx-beam" d={primaryBeamPath} pathLength={100} /> : null}
+                  {secondaryBeamPath ? (
+                    <path className="table-fx-beam is-alt" d={secondaryBeamPath} pathLength={100} />
+                  ) : null}
+                </svg>
+                {actionFxActorPoint ? (
+                  <div
+                    className="table-fx-node is-actor"
+                    style={{ left: `${actionFxActorPoint.x}%`, top: `${actionFxActorPoint.y}%` }}
+                  />
+                ) : null}
+                {actionFxTargetPoint ? (
+                  <div
+                    className="table-fx-node is-target"
+                    style={{ left: `${actionFxTargetPoint.x}%`, top: `${actionFxTargetPoint.y}%` }}
+                  />
+                ) : null}
+                {actionFx?.type === "swap_center" || actionFx?.type === "win" ? (
+                  <div className="table-fx-node is-center" style={{ left: "50%", top: "50%" }} />
+                ) : null}
+                {actionFx?.type === "reveal" || actionFx?.type === "skill" ? (
+                  <div
+                    className="table-fx-bloom"
+                    style={{
+                      left: `${(actionFxTargetPoint ?? actionFxActorPoint ?? centerPoint).x}%`,
+                      top: `${(actionFxTargetPoint ?? actionFxActorPoint ?? centerPoint).y}%`,
+                    }}
+                  />
+                ) : null}
+                {actionFx?.type === "win" ? <div className="table-fx-crown-burst" /> : null}
+              </div>
+            ) : null}
             <div className="table-center">
               <p>第 {publicState.turn.round} 轮</p>
               <p>当前行动：{currentActor?.name ?? "-"}</p>
+              {publicState.phase === "in_game" && currentCountdownLabel ? (
+                <p>{currentCountdownLabel}：{currentCountdownSeconds} 秒</p>
+              ) : null}
             </div>
             {playersOrdered.map((player, index) => {
               const revealedRole = player.revealedRole;
+              const displayRole = revealedRole ?? (postgameRevealOpen ? player.finalRole : undefined);
               const current = player.id === currentPlayerId;
               const selected = player.id === selectedTarget;
               const isSelf = player.id === myPlayerId;
               const note = notesByPlayerId[player.id];
-              const showFront = !!revealedRole;
-              const showCrown = revealedRole === "sultan" && player.alive && publicState.phase === "in_game";
+              const showFront = !!displayRole;
+              const showCrown = displayRole === "sultan" && publicState.phase !== "lobby";
               const publicPrediction = player.publicPrediction ? factionName(player.publicPrediction) : "";
               const isDetained = player.alive && player.skipActions > 0;
 
@@ -1006,13 +1217,13 @@ export function App() {
                   <button
                     className={`seat-btn ${current ? "current" : ""} ${selected ? "selected" : ""} ${!player.alive ? "dead" : ""} ${isDetained ? "detained" : ""}`}
                     onClick={() => openSeatOverlay(player.id)}
-                  >
-                    <div className={`seat-card ${showFront ? "front" : "back"}`}>
-                      {showFront && revealedRole ? (
-                        <img src={ROLE_META[revealedRole].iconSmall} alt={ROLE_META[revealedRole].name} />
-                      ) : (
-                        <img src={BACK_ICON} alt="卡背" />
-                      )}
+                    >
+                      <div className={`seat-card ${showFront ? "front" : "back"}`}>
+                        {showFront && displayRole ? (
+                          <img src={ROLE_META[displayRole].iconSmall} alt={ROLE_META[displayRole].name} />
+                        ) : (
+                          <img src={BACK_ICON} alt="卡背" />
+                        )}
                     </div>
                   </button>
                   <div className="seat-label">
@@ -1032,6 +1243,10 @@ export function App() {
                   {publicState.phase === "lobby" ? (
                     <span className={player.ready ? "seat-ready-tag" : "seat-unready-tag"}>
                       {player.ready ? "已准备" : "未准备"}
+                    </span>
+                  ) : publicState.phase === "finished" && postgameStage === "continue" ? (
+                    <span className={player.ready ? "seat-ready-tag" : "seat-unready-tag"}>
+                      {player.ready ? "继续" : "未决定"}
                     </span>
                   ) : null}
                   {noteEditorFor === player.id ? (
@@ -1090,24 +1305,33 @@ export function App() {
             )}
             <div className="turn-box">
               <p>
-                {isMyPendingFollowTurn
-                  ? "当前需要你决定是否跟随起义。"
-                  : isMySlaveEndTurn
-                    ? "起义连锁已经处理完，现在由你决定何时结束回合。"
-                    : isMyOraclePredictionTurn
+                {publicState.phase === "finished"
+                  ? postgameStage === "impact"
+                    ? "本局已结束，终局特效结算中。"
+                    : postgameStage === "showdown"
+                      ? `终局揭晓中，${postgameRevealCountdown} 秒后进入续局选择。`
+                      : hasConfirmedContinue
+                        ? `你已确认继续，当前 ${postgameContinueVotes}/${playersOrdered.length} 人同意。`
+                        : `本局已结束，当前 ${postgameContinueVotes}/${playersOrdered.length} 人同意继续。`
+                  : isMyPendingFollowTurn
+                  ? canFollowUprising
+                    ? "当前轮到你决定是否跟随起义。"
+                    : "当前轮到你响应起义，但你不是奴隶，只能选择不跟随。"
+                  : isMyOraclePredictionTurn
                       ? "你已经看完三名玩家身份，现在需要公开预言阵营。"
                       : pendingAction?.kind === "slave_uprising_follow"
-                    ? `正在等待 ${pendingUprisingResponder?.name ?? "指定玩家"} 响应起义。`
-                    : pendingAction?.kind === "slave_uprising_end_turn"
-                      ? `正在等待 ${pendingUprisingInitiator?.name ?? "起义发起者"} 结束回合。`
+                    ? `正在等待 ${pendingUprisingResponder?.name ?? "当前登台奴隶"} 两侧玩家响应起义。`
                       : pendingAction?.kind === "oracle_prediction"
                         ? `正在等待 ${pendingOraclePlayer?.name ?? "占卜师"} 公开预言。`
+                        : pendingAction?.kind === "slave_trader_pick"
+                          ? `正在等待 ${pendingSlaveTraderPlayer?.name ?? "奴隶贩子"} 继续筛查。`
                     : isMyTurn
                       ? "现在轮到你行动。"
                       : "请等待其他玩家行动。"}
               </p>
               <p>状态：{me?.alive ? "存活" : "阵亡"}</p>
               <p>拘留：{(me?.skipActions ?? 0) > 0 ? `剩余 ${me?.skipActions} 次` : "无"}</p>
+              {publicState.phase === "in_game" && currentCountdownLabel ? <p>{currentCountdownLabel}：{currentCountdownSeconds} 秒</p> : null}
             </div>
           </article>
 
@@ -1228,8 +1452,8 @@ export function App() {
               <p className="tip">
                 {canFollowUprising
                   ? "当前轮到你决定是否跟随起义。"
-                  : isMySlaveEndTurn
-                    ? "你已经完成起义连锁，现在可以手动结束回合。"
+                  : isMyPendingFollowTurn
+                    ? "你不是奴隶，当前只能选择不跟随。"
                     : "你可在自己的回合发起起义。"}
               </p>
             ) : null}
@@ -1282,9 +1506,9 @@ export function App() {
                 </div>
               </>
             ) : null}
-            {!privacyMaskOn && !canFollowUprising && !isMyOraclePredictionTurn && roleNeedTarget(myRole) ? <p className="tip">该技能需要先选择目标。</p> : null}
+            {!privacyMaskOn && !canFollowUprising && !isMyOraclePredictionTurn && !isMyPendingFollowTurn && roleNeedTarget(myRole) ? <p className="tip">该技能需要先选择目标。</p> : null}
             <div className="row">
-              {!isMyOraclePredictionTurn && !isMySlaveEndTurn ? (
+              {!isMyOraclePredictionTurn && !isMyPendingFollowTurn ? (
                 <button disabled={revealDisabled} className={myRole === "assassin" ? "skill-fire is-kill" : "skill-fire"} onClick={doReveal}>
                   {privacyMaskOn ? "执行身份技能" : revealLabel}
                 </button>
@@ -1294,14 +1518,14 @@ export function App() {
                   公开预言并结束回合
                 </button>
               ) : null}
-              {!privacyMaskOn && isMySlaveEndTurn ? (
-                <button className="skill-fire" onClick={doEndTurn}>
-                  结束回合
+              {!privacyMaskOn && isMyPendingFollowTurn ? (
+                <button disabled={!canFollowUprising} className="skill-fire" onClick={doReveal}>
+                  跟随起义
                 </button>
               ) : null}
-              {!privacyMaskOn && canFollowUprising ? (
+              {!privacyMaskOn && isMyPendingFollowTurn ? (
                 <button className="btn-outline" onClick={doDeclineFollow}>
-                  放弃跟随
+                  不跟随
                 </button>
               ) : null}
             </div>
@@ -1320,6 +1544,17 @@ export function App() {
 
       <ErrorPanel errors={errors} />
       <RuleModal open={showRuleModal} onClose={() => setShowRuleModal(false)} />
+      <PostgameModal
+        open={publicState.phase === "finished" && !!winner && !!postgameStage}
+        stage={postgameStage}
+        winner={winner}
+        players={playersOrdered}
+        continuedCount={postgameContinueVotes}
+        hasConfirmedContinue={hasConfirmedContinue}
+        revealCountdown={postgameRevealCountdown}
+        onContinue={() => setContinueVote(true)}
+        onPauseContinue={() => setContinueVote(false)}
+      />
     </div>
   );
 }
@@ -1585,6 +1820,71 @@ function RuleModal(props: { open: boolean; onClose: () => void }) {
             ))}
           </div>
         </div>
+      </section>
+    </div>
+  );
+}
+
+function PostgameModal(props: {
+  open: boolean;
+  stage: PostgameStage | null;
+  winner?: NonNullable<PlayerScopedState["publicState"]["winner"]>;
+  players: PlayerScopedState["publicState"]["players"];
+  continuedCount: number;
+  hasConfirmedContinue: boolean;
+  revealCountdown: number;
+  onContinue: () => void;
+  onPauseContinue: () => void;
+}) {
+  if (!props.open || !props.stage || !props.winner) {
+    return null;
+  }
+
+  return (
+    <div className={`settlement-mask stage-${props.stage}`}>
+      <section className={`settlement-modal stage-${props.stage}`}>
+        <h3>{props.stage === "impact" ? "终局结算中" : props.stage === "showdown" ? "身份揭晓" : "是否继续下一局"}</h3>
+        <p className="settlement-win">{factionName(props.winner.winnerFaction)}获胜</p>
+        <p className="settlement-reason">{props.winner.reason}</p>
+
+        {props.stage === "impact" ? <div className="settlement-burst" aria-hidden="true" /> : null}
+        {props.stage === "showdown" ? (
+          <p className="settlement-callout">全员身份已公开，{props.revealCountdown} 秒后开放续局选择。</p>
+        ) : null}
+
+        {props.stage === "continue" ? (
+          <>
+            <p className="settlement-callout">
+              当前 {props.continuedCount}/{props.players.length} 人选择继续。所有仍在房间里的玩家都同意后，会自动重新发牌开始下一局。
+            </p>
+            <div className="row settlement-actions">
+              <button onClick={props.onContinue}>{props.hasConfirmedContinue ? "已确认继续" : "继续下一局"}</button>
+              <button className="btn-outline" onClick={props.onPauseContinue}>
+                这轮先不继续
+              </button>
+            </div>
+          </>
+        ) : null}
+
+        {props.stage !== "impact" ? (
+          <div className="settlement-scoreboard">
+            {props.players.map((player) => {
+              const score = props.winner?.scoreByPlayerId?.[player.id] ?? 0;
+              return (
+                <div key={player.id} className="settlement-row">
+                  <span>
+                    #{player.seatIndex + 1} {player.name}
+                    {player.finalRole ? ` · ${ROLE_META[player.finalRole].name}` : ""}
+                  </span>
+                  <span>
+                    {score > 0 ? `${score} 分` : "0 分"}
+                    {props.stage === "continue" ? ` · ${player.ready ? "继续" : "未决定"}` : ""}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
       </section>
     </div>
   );

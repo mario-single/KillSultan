@@ -24,7 +24,8 @@ type CoreRulesCommand =
   | "action_oracle_prediction"
   | "action_end_turn"
   | "action_slave_trader_pick"
-  | "disconnect";
+  | "disconnect"
+  | "timeout";
 
 interface CoreRulesSuccess {
   ok: true;
@@ -95,6 +96,10 @@ export class CoreRulesBridge {
 
   async disconnect(state: GameState, playerId: string): Promise<CoreRulesMutationResult> {
     return this.execute("disconnect", { state, playerId });
+  }
+
+  async timeout(state: GameState): Promise<CoreRulesMutationResult> {
+    return this.execute("timeout", { state });
   }
 
   private async execute(
